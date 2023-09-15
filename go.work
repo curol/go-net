@@ -1,0 +1,15 @@
+go 1.21.0
+
+use ./server
+
+use ./request
+
+use ./message
+
+use ./router
+
+use ./store
+
+use ./reader
+
+use ./writer
