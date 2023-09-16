@@ -5,7 +5,7 @@
 ```mermaid
 flowchart LR
 
-Client[Client]--> |RequestMessage| B(Server)
+Client[Client]--> |Message| B(Server)
 
 
 B --> |Read|C{Router}
@@ -59,7 +59,7 @@ id1[(Database)]
 
 id2((This is the text in the circle))
 
-A[Client] -->|RequestMessage| B(Server)
+A[Client] -->|Message| B(Server)
 ```
 
 

@@ -1,4 +1,4 @@
-package message
+package gonet
 
 import (
 	"bufio"
@@ -90,7 +90,7 @@ func parseHeaders(reader *bufio.Reader) (map[string]string, error) {
 
 // Body is the payload of the message.
 //
-// Why carefully read the body with content-length?
+// Why carefully read the body?
 // Because the size of the data might be too big for server to read all at once.
 // For streams, we don't want to read the entire body at once into memory.
 // If its too big, we might run out of memory.

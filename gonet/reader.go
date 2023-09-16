@@ -1,4 +1,4 @@
-package reader
+package gonet
 
 // Returns error if reader is nil
 import (

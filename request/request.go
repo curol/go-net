@@ -12,16 +12,7 @@ import (
 
 // Request properties
 type Request struct {
-	// Request line
-	// method  string // GET, POST, PUT, DELETE, etc.
-	// path    string // /, /index.html, /about.html, etc.
-	// version string // HTTP/1.1, HTTP/2.0, etc.
-	// headers map[string]string
-	// body    []byte
-	// size    int
-	// Message from client
-	// message *message.Message
-	*message.RequestMessage
+	*message.Message
 	r *reader.RequestReader
 	w *writer.ResponseWriter
 }
@@ -40,8 +31,8 @@ func newRequest(con net.Conn) *Request {
 	if err != nil {
 		panic(err)
 	}
-	// Set RequestMessage
-	req.RequestMessage = reqMessage
+	// Set Message
+	req.Message = reqMessage
 	return req
 }
 
@@ -53,7 +44,7 @@ func NewRequestFromBytes(data []byte) *Request {
 	req.r = nil
 	req.w = nil
 	// Read
-	req.RequestMessage, _ = message.NewRequestMessage(reader)
+	req.Message, _ = message.NewMessage(reader)
 	return req
 }
 
@@ -66,10 +57,6 @@ func (req *Request) Reader() *reader.RequestReader {
 
 func (req *Request) Writer() *writer.ResponseWriter {
 	return req.w
-}
-
-func (req *Request) Message() message.RequestMessage {
-	return *req.RequestMessage.Copy()
 }
 
 // Decode request body into v.

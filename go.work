@@ -13,3 +13,5 @@ use ./store
 use ./reader
 
 use ./writer
+
+use ./gonet

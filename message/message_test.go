@@ -29,7 +29,7 @@ func TestMessage(t *testing.T) {
 
 	// Server
 	go func() {
-		req, err := NewRequestMessageFromConnection(server)
+		req, err := NewMessageFromConnection(server)
 		if err != nil {
 			fmt.Println("Server error:")
 			panic(err)

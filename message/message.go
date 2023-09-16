@@ -8,8 +8,8 @@ import (
 	"sort"
 )
 
-// RequestMessage represents the request message sent from the client.
-type RequestMessage struct {
+// Message represents the request message sent from the client.
+type Message struct {
 	// Request line
 	method   string
 	path     string
@@ -20,25 +20,25 @@ type RequestMessage struct {
 	body []byte
 }
 
-// Returns RequestMessage from reader
-func NewRequestMessage(reader *bufio.Reader) (*RequestMessage, error) {
+// Returns Message from reader
+func NewMessage(reader *bufio.Reader) (*Message, error) {
 	return parse(reader)
 }
 
-// Returns RequestMessage from connection
-func NewRequestMessageFromConnection(conn net.Conn) (*RequestMessage, error) {
+// Returns Message from connection
+func NewMessageFromConnection(conn net.Conn) (*Message, error) {
 	reader := bufio.NewReader(conn)
 	return parse(reader)
 }
 
-// Returns RequestMessage from bytes
-func NewRequestMessageFromBytes(data []byte) (*RequestMessage, error) {
+// Returns Message from bytes
+func NewMessageFromBytes(data []byte) (*Message, error) {
 	reader := bufio.NewReader(bytes.NewReader(data))
 	return parse(reader)
 }
 
-// Convert RequestMessage to bytes
-func (rm *RequestMessage) ToBytes() []byte {
+// Convert Message to bytes
+func (rm *Message) ToBytes() []byte {
 	// Format the request line
 	requestLine := fmt.Sprintf("%s %s %s\r\n", rm.method, rm.path, rm.protocol)
 
@@ -56,8 +56,8 @@ func (rm *RequestMessage) ToBytes() []byte {
 	return []byte(request)
 }
 
-// Convert RequestMessage to map
-func (rm *RequestMessage) ToMap() map[string]string {
+// Convert Message to map
+func (rm *Message) ToMap() map[string]string {
 	return map[string]string{
 		"method":   rm.method,
 		"path":     rm.path,
@@ -67,33 +67,33 @@ func (rm *RequestMessage) ToMap() map[string]string {
 	}
 }
 
-// Compares two RequestMessages
-func (rm *RequestMessage) Equals(other *RequestMessage) bool {
+// Compares two Messages
+func (rm *Message) Equals(other *Message) bool {
 	return bytes.Equal(rm.ToBytes(), other.ToBytes())
 }
 
 // Get Method
-func (rm *RequestMessage) Method() string {
+func (rm *Message) Method() string {
 	return rm.method
 }
 
 // Get Path
-func (rm *RequestMessage) Path() string {
+func (rm *Message) Path() string {
 	return rm.path
 }
 
 // Get Protocol
-func (rm *RequestMessage) Protocol() string {
+func (rm *Message) Protocol() string {
 	return rm.protocol
 }
 
 // Get Headers
-func (rm *RequestMessage) Headers() map[string]string {
+func (rm *Message) Headers() map[string]string {
 	return rm.headers
 }
 
 // Headers sorted by name
-func (rm *RequestMessage) HeadersToSlice() []string {
+func (rm *Message) HeadersToSlice() []string {
 	// Extract the keys and sort them
 	keys := make([]string, 0, len(rm.headers))
 	for k := range rm.headers {
@@ -113,19 +113,19 @@ func (rm *RequestMessage) HeadersToSlice() []string {
 }
 
 // Print Headers
-func (rm *RequestMessage) PrintHeaders() {
+func (rm *Message) PrintHeaders() {
 	for _, value := range rm.HeadersToSlice() {
 		fmt.Println(value)
 	}
 }
 
 // Get Body
-func (rm *RequestMessage) Body() []byte {
+func (rm *Message) Body() []byte {
 	return rm.body
 }
 
 // Print
-func (rm *RequestMessage) Print() {
+func (rm *Message) Print() {
 	fmt.Println("Method:", rm.method)
 	fmt.Println("Path:", rm.path)
 	fmt.Println("Protocol:", rm.protocol)
@@ -137,9 +137,9 @@ func (rm *RequestMessage) Print() {
 	rm.PrintHeaders()
 }
 
-// Copy RequestMessage and return new RequestMessage
-func (rm *RequestMessage) Copy() *RequestMessage {
-	return &RequestMessage{
+// Copy Message and return new Message
+func (rm *Message) Copy() *Message {
+	return &Message{
 		method:   rm.method,
 		path:     rm.path,
 		protocol: rm.protocol,

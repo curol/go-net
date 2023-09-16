@@ -8,11 +8,8 @@ import (
 	"net"
 )
 
-// Message -> Connection -> Read -> Parse -> Request -> Route
-
 // Read reader and return slice of lines seperated by the delimeter
 // In order for this to work, the connection must be closed or else it will block forever.
-
 func ReadConnectionIntoBuffer(conn net.Conn) []byte {
 	buffer := make([]byte, 1024)
 	data := make([]byte, 0)
@@ -36,7 +33,7 @@ func ReadConnectionIntoBuffer(conn net.Conn) []byte {
 }
 
 // Copy TCP connection to buffer
-func copyConnectionToBuffer(conn net.Conn) *bytes.Buffer {
+func CopyConnectionToBuffer(conn net.Conn) *bytes.Buffer {
 	var buffer bytes.Buffer
 	_, err := io.CopyBuffer(&buffer, conn, nil)
 	if err != nil {
@@ -46,7 +43,7 @@ func copyConnectionToBuffer(conn net.Conn) *bytes.Buffer {
 }
 
 // Read reader and return slice of lines seperated by the delimeter
-func readLinesFromReader(reader *bufio.Reader, delim byte) []byte {
+func ReadReader(reader *bufio.Reader, delim byte) []byte {
 	lines := make([]byte, 0)
 
 	// Read data from the connection line by line
