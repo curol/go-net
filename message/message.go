@@ -4,146 +4,176 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"io"
+	"log"
 	"net"
-	"sort"
+	"os"
+	"strings"
 )
 
-// Message represents the request message sent from the client.
+// Message represents the raw request message.
 type Message struct {
-	// Request line
-	method   string
-	path     string
-	protocol string
-	// Headers
-	headers map[string]string
-	// Payload
-	body []byte
+	*head
+	// Body is the payload or content of the message.
+	body *Body
+	// Reader
+	r *bufio.Reader
+	// Length
+	len int
 }
 
 // Returns Message from reader
-func NewMessage(reader *bufio.Reader) (*Message, error) {
-	return parse(reader)
-}
+func NewMessage(reader interface{}) (*Message, error) {
+	message := &Message{}
 
-// Returns Message from connection
-func NewMessageFromConnection(conn net.Conn) (*Message, error) {
-	reader := bufio.NewReader(conn)
-	return parse(reader)
-}
-
-// Returns Message from bytes
-func NewMessageFromBytes(data []byte) (*Message, error) {
-	reader := bufio.NewReader(bytes.NewReader(data))
-	return parse(reader)
-}
-
-// Convert Message to bytes
-func (rm *Message) ToBytes() []byte {
-	// Format the request line
-	requestLine := fmt.Sprintf("%s %s %s\r\n", rm.method, rm.path, rm.protocol)
-
-	// Format the headers
-	headers := ""
-	for _, v := range rm.HeadersToSlice() {
-		headers += fmt.Sprintf("%s\r\n", v)
-		// headers += fmt.Sprintf("%s: %s\r\n", name, value)
+	// Arrange
+	switch v := reader.(type) {
+	case net.Conn:
+		message.r = bufio.NewReader(v)
+	case *bufio.Reader:
+		message.r = bufio.NewReader(v)
+	case []byte:
+		message.r = bufio.NewReader(bytes.NewReader(v))
+	case io.Reader:
+		message.r = bufio.NewReader(v)
+	default:
+		return nil, fmt.Errorf("Invalid reader type")
 	}
 
-	// Combine the request line, headers, and body
-	request := requestLine + headers + "\r\n" + string(rm.body)
-
-	// Convert the request to bytes
-	return []byte(request)
-}
-
-// Convert Message to map
-func (rm *Message) ToMap() map[string]string {
-	return map[string]string{
-		"method":   rm.method,
-		"path":     rm.path,
-		"protocol": rm.protocol,
-		"headers":  fmt.Sprintf("%v", rm.Headers()),
-		"body":     string(rm.body),
+	// Head
+	h, err := newHead(message.r)
+	if err != nil {
+		return nil, err
 	}
-}
+	// message.head = *h
+	message.head = h
 
-// Compares two Messages
-func (rm *Message) Equals(other *Message) bool {
-	return bytes.Equal(rm.ToBytes(), other.ToBytes())
+	// Body
+	cl, _ := message.head.ContentLength()
+	message.body = NewBody(message.r, message.head.header)
+
+	// Length
+	message.len = message.head.Len() + cl
+
+	return message, nil
 }
 
 // Get Method
 func (rm *Message) Method() string {
-	return rm.method
+	return rm.head.rl.method
 }
 
 // Get Path
 func (rm *Message) Path() string {
-	return rm.path
+	return rm.head.rl.path
 }
 
 // Get Protocol
 func (rm *Message) Protocol() string {
-	return rm.protocol
+	return rm.head.rl.protocol
 }
 
-// Get Headers
-func (rm *Message) Headers() map[string]string {
-	return rm.headers
+// Get Header
+func (rm *Message) Header() *Header {
+	return rm.head.header
 }
 
-// Headers sorted by name
-func (rm *Message) HeadersToSlice() []string {
-	// Extract the keys and sort them
-	keys := make([]string, 0, len(rm.headers))
-	for k := range rm.headers {
-		keys = append(keys, k)
-	}
-
-	// Sort keys
-	sort.Strings(keys)
-
-	// Create a new slice with sorted headers
-	sortedHeaders := make([]string, 0, len(rm.headers))
-	for _, k := range keys {
-		sortedHeaders = append(sortedHeaders, fmt.Sprintf("%s: %s", k, rm.headers[k]))
-	}
-
-	return sortedHeaders
-}
-
-// Print Headers
-func (rm *Message) PrintHeaders() {
-	for _, value := range rm.HeadersToSlice() {
-		fmt.Println(value)
-	}
-}
-
-// Get Body
-func (rm *Message) Body() []byte {
+func (rm *Message) Body() *Body {
 	return rm.body
 }
 
-// Print
-func (rm *Message) Print() {
-	fmt.Println("Method:", rm.method)
-	fmt.Println("Path:", rm.path)
-	fmt.Println("Protocol:", rm.protocol)
-	fmt.Println("Headers:", rm.headers)
-	fmt.Println("Bytes:", rm.ToBytes())
-	fmt.Println("Map:", rm.ToMap())
-	fmt.Println("Size:", len(rm.ToBytes()))
-	fmt.Println("Body:", string(rm.body))
-	rm.PrintHeaders()
+func (m *Message) Reader() *bufio.Reader {
+	return m.r
 }
 
-// Copy Message and return new Message
-func (rm *Message) Copy() *Message {
-	return &Message{
-		method:   rm.method,
-		path:     rm.path,
-		protocol: rm.protocol,
-		headers:  rm.headers,
-		body:     rm.body,
+// Len returns the length of the message, head, and body.
+func (m *Message) Len() (int, int, int) {
+	cl, err := m.head.ContentLength()
+	if err != nil {
+		log.Println(err)
+		cl = 0
 	}
+	return m.len, m.head.Len(), cl
+}
+
+func (m *Message) String() string {
+	mes := m
+
+	// Message
+	mesLen, _, bodyLen := m.Len()
+	lines := []string{
+		fmt.Sprintf("Message: %p", mes),
+		fmt.Sprintf("\t- Length: %d", mesLen),
+	}
+
+	// Head
+	lines = append(lines, m.Strings()...)
+
+	// Body
+	lines = append(lines, fmt.Sprintf("\t- Body: %p", mes.body))
+	lines = append(lines, fmt.Sprintf("\t\t- Length: %d", bodyLen))
+
+	// Reader
+	lines = append(lines, fmt.Sprintf("\t- Reader: %p", mes.r))
+
+	return strings.Join(lines, "\n")
+}
+
+// Read
+func (m *Message) Read(p []byte) (n int, err error) {
+	return m.r.Read(p)
+}
+
+func (m *Message) Equals(other *Message) bool {
+	// TODO: Reflect?
+	// 	reflect.DeepEqual(m, other)
+
+	// Check if both messages are nil
+	if m == nil && other == nil {
+		return true
+	}
+	if m == nil || other == nil {
+		return false
+	}
+
+	// Compare head fields
+	if !m.head.Equals(other.head) {
+		return false
+	}
+
+	// Compare body fields
+	if !m.body.Equals(other.body) {
+		return false
+	}
+
+	// Compare len fields
+	if m.len != other.len {
+		return false
+	}
+
+	return true
+}
+
+// Write to file
+func (m *Message) ToFile(fn string) {
+	f, err := os.Create(fn)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer f.Close()
+	// fmt.Fprintln(f, m.String())
+	b := m.ToBytes()
+	n, err := f.Write(b)
+	if err != nil {
+		log.Println("Error writing to file:", err)
+	}
+	fmt.Printf("%d bytes written to file %s\n", n, fn)
+}
+
+func (m *Message) ToBytes() []byte {
+	b, err := m.head.ToBytes()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return b
 }

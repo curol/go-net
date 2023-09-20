@@ -3,7 +3,6 @@ package request
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"message"
 	"net"
 	"reader"
@@ -59,11 +58,11 @@ func (req *Request) Writer() *writer.ResponseWriter {
 	return req.w
 }
 
-// Decode request body into v.
-// Uses json.Unmarshal function to decode a JSON string to a v object.
-func (req *Request) JSON(v any) error {
-	// Data
-	data := req.Body()
-	// Decode
-	return json.Unmarshal(data, v)
-}
+// // Decode request body into v.
+// // Uses json.Unmarshal function to decode a JSON string to a v object.
+// func (req *Request) JSON(v any) error {
+// 	// Data
+// 	data := req.Body()
+// 	// Decode
+// 	return json.Unmarshal(data, v)
+// }

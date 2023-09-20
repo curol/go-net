@@ -15,3 +15,7 @@ use ./reader
 use ./writer
 
 use ./gonet
+
+use ./test
+
+use ./util
