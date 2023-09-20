@@ -1,4 +1,4 @@
-package ioutil
+package stream
 
 import (
 	"bufio"
@@ -10,16 +10,67 @@ import (
 )
 
 // *********************************************************************************************************************
-// Readers/Writers
+// Readers/Writer Interfaces
+//
+// `Reader` and `Writer` are interfaces that define the behavior of streams of bytes.
+//
+// The underlying data stream (the source of stream of bytes) can be a file, a network connection, a buffer in memory, etc.
+//
+// When creating new readers/writers from []bytes, use package `bytes`.
+// When creating new readers/writers from readers or writers, use package `bufio`.
+// os.File is a reader and writer.
 // *********************************************************************************************************************
-// NewReader returns a new Reader whose buffer has the default size.
-func NewReader(r io.Reader) *bufio.Reader {
-	return bufio.NewReader(r)
+
+// Reader interface has a Read method.
+// Read reads up to len(p) bytes into p.
+type Reader = io.Reader
+
+// Writer interface has a Write method.
+// Write writes len(p) bytes from p to the underlying data stream.
+type Writer = io.Writer
+
+// ReadWriter is the interface that groups the basic Read and Write methods.
+type ReadWriter = io.ReadWriter
+
+// Buffer interface has interfaces Reader and Writer.
+// Buffer is a variable-sized buffer of bytes with Read and Write methods.
+type BufferInterface = ReadWriter
+
+// A Buffer is a variable-sized buffer of bytes, which implements Reader and Writer interfaces.
+// The zero value for Buffer is an empty buffer ready to use.
+type Buffer = bytes.Buffer
+
+// *********************************************************************************************************************
+// Reader/Writer Helpers
+//
+// *********************************************************************************************************************
+
+// NewBuffer creates and initializes a new bytes.Buffer using buf as its initial contents.
+// Buffer implents interface ReadWriter.
+// You can use type `nil` to create an empty buffer.
+//
+// Arguments:
+//
+//	buf []byte
+//
+// Returns:
+//
+//	*bytes.Buffer
+//
+// Note: The new Buffer takes ownership of buf,
+// and the caller should not use buf after this call.
+func NewBuffer(buf []byte) *bytes.Buffer {
+	// Creates and initializes a new Buffer using buf as its initial contents.
+	return bytes.NewBuffer(buf)
 }
 
-// NewBuffer creates and initializes a new Buffer using buf as its initial contents.
-func NewBuffer(buf []byte) *bytes.Buffer {
-	return bytes.NewBuffer(buf)
+// NewWriterAndBuffer returns a new Writer whose buffer has the default size.
+// Writer writes to the bytes.Buffer.
+func NewWriterAndBuffer() (*bufio.Writer, *bytes.Buffer) {
+	// Create a bytes.Buffer
+	var b Buffer
+	// Create a bufio.Writer that writes to the bytes.Buffer
+	return NewWriter(&b), &b
 }
 
 // NewWriter returns a new Writer whose buffer has the default size.
@@ -27,15 +78,22 @@ func NewWriter(w io.Writer) *bufio.Writer {
 	return bufio.NewWriter(w)
 }
 
-// NewWriterAndBuffer returns a new Writer whose buffer has the default size.
-func NewWriterAndBuffer() (*bufio.Writer, *bytes.Buffer) {
-	// Create a bytes.Buffer
-	var b bytes.Buffer
-	// Create a bufio.Writer that writes to the bytes.Buffer
-	return NewWriter(&b), &b
+// NewReader returns a new Reader whose buffer has the default size.
+func NewReader(r io.Reader) *bufio.Reader {
+	return bufio.NewReader(r)
 }
 
-// NewFile returns a new File with the given name, file flag and file mode.
+// NewReadWriter returns a new ReadWriter with the given buffer size.
+func NewReadWriter(r io.Reader, w io.Writer) *bufio.ReadWriter {
+	return bufio.NewReadWriter(bufio.NewReader(r), bufio.NewWriter(w))
+}
+
+// NewScanner returns a new Scanner to read from r.
+func NewScanner(r io.Reader) *bufio.Scanner {
+	return bufio.NewScanner(r)
+}
+
+// Open returns a new File with the given name, file flag and file mode.
 func Open(name string, flag int, perm os.FileMode) (*os.File, error) {
 	// Flags:
 	//   os.O_RDONLY = 0
@@ -48,12 +106,12 @@ func Open(name string, flag int, perm os.FileMode) (*os.File, error) {
 	return os.OpenFile(name, flag, perm)
 }
 
-// NewReadOnlyFile returns a new File with the O_RDONLY flag set.
-func OpenReadOnly(name string) (*os.File, error) {
-	return os.Open(name)
+// OpenReadOnlyFile returns a new File with the O_RDONLY flag set.
+func OpenReadOnly(fn string) (*os.File, error) {
+	return os.Open(fn)
 }
 
-// NewRWFile returns a new File with the O_RDWR | os.O_CREATE | os.O_TRUNC flag set
+// OpenRWFile returns a new File with the O_RDWR | os.O_CREATE | os.O_TRUNC flag set
 // and permissions 0644, which gives read and write permissions to the owner of the file,
 // and read-only permissions to everyone else.
 func OpenRWFile(fn string) (*os.File, error) {
@@ -70,8 +128,13 @@ func NoCloser(r io.Reader) io.ReadCloser {
 	return io.NopCloser(r)
 }
 
+// func NewReaderFromString(s string) *strings.Reader {
+// 	return strings.NewReader(s)
+// 	// return bufio.NewReader(bytes.NewReader([]byte(s)))
+// }
+
 // *********************************************************************************************************************
-// Read
+// Read helpers
 // *********************************************************************************************************************
 
 // ReadAll reads from r until an error or EOF and returns the data it read.
@@ -147,7 +210,7 @@ func ReadFile(fn string, buf []byte) (int, error) {
 }
 
 // *********************************************************************************************************************
-// Write
+// Write helpers
 // *********************************************************************************************************************
 
 // Write writes len(p) bytes from p to the File.

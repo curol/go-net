@@ -2,6 +2,147 @@
 
 go-net is an golang net playground.
 
+## Read File
+
+```go
+    // Open the file for reading
+    file, err := os.Open("example.txt")
+    if err != nil {
+        panic(err)
+    }
+    defer file.Close()
+
+    // Create a new bufio.Reader from the file
+    reader := bufio.NewReader(file)
+
+    // Read the file line by line
+    for {
+        // Read the next line from the file
+        line, err := reader.ReadString('\n')
+        if err != nil && err != io.EOF {
+            panic(err)
+        }
+
+        // Print the line
+        fmt.Print(line)
+
+        // If we've reached the end of the file, break out of the loop
+        if err == io.EOF {
+            break
+        }
+    }
+```
+
+
+## Read and Write to file
+
+```go
+package main
+
+import (
+    "bufio"
+    "io"
+    "os"
+)
+
+func main() {
+    // Open the input file for reading
+    inputFile, err := os.Open("input.txt")
+    if err != nil {
+        panic(err)
+    }
+    defer inputFile.Close()
+
+    // Create a new bufio.Reader from the input file
+    inputReader := bufio.NewReader(inputFile)
+
+    // Open the output file for writing
+    outputFile, err := os.Create("output.txt")
+    if err != nil {
+        panic(err)
+    }
+    defer outputFile.Close()
+
+    // Create a new bufio.Writer for the output file
+    outputWriter := bufio.NewWriter(outputFile)
+
+    // Read the input file line by line and write to the output file
+    for {
+        // Read the next line from the input file
+        line, err := inputReader.ReadString('\n')
+        if err != nil && err != io.EOF {
+            panic(err)
+        }
+
+        // Write the line to the output file
+        _, err = outputWriter.WriteString(line)
+        if err != nil {
+            panic(err)
+        }
+
+        // If we've reached the end of the input file, break out of the loop
+        if err == io.EOF {
+            break
+        }
+    }
+
+    // Flush the output buffer to ensure all data is written to the file
+    err = outputWriter.Flush()
+    if err != nil {
+        panic(err)
+    }
+}
+```
+
+## Read
+
+When reading from a file in Go, it's generally best practice to use a bufio.Reader to buffer the input. This can improve performance by reducing the number of system calls needed to read the file.
+
+```go
+// Buffer
+chunkSize := 5
+buffer := make([]byte,chunkSize)
+
+// Storage
+file := os.Open("example.txt")
+
+// Read until all bytes read from underlying data
+for{
+    // Read data into buffer
+    n,err := reader.Read(buffer)
+
+    // Break when done
+    if err != nil || err == io.EOF{
+        break
+    }
+
+    // Write contents to destination
+    file.Append(buffer[:n])
+}
+```
+
+
+## FD
+
+In Unix-based operating systems, a file descriptor is a non-negative integer that uniquely identifies an open file or other input/output resource, such as a network socket or a pipe.
+
+When a process opens a file or other resource, the operating system assigns it a file descriptor. The process can then use this file descriptor to read from or write to the file or resource.
+
+File descriptors are used extensively in Unix-based systems for input/output operations. They are used by system calls such as open, read, write, close, select, and poll.
+
+In Go, file descriptors are represented by the os.File type. When you open a file using os.Open, for example, you get an os.File object that represents the file and provides methods for reading from and writing to it. Under the hood, the os.File object is backed by a file descriptor.
+
+
+## Stream
+
+In computing, a file stream is a sequence of data bytes that are read from or written to a file. A file stream is a higher-level abstraction than a file descriptor, which is a low-level identifier used by the operating system to represent an open file.
+
+A file stream provides a buffered interface for reading from or writing to a file. This means that data is read from or written to the file in chunks, rather than one byte at a time. This can improve performance, especially when reading or writing large amounts of data.
+
+In Go, file streams are represented by the os.File type. When you open a file using os.Open, for example, you get an os.File object that represents the file and provides methods for reading from and writing to it. The os.File type provides a buffered interface for reading and writing, using the bufio.Reader and bufio.Writer types, respectively.
+
+File streams are used extensively in programming for input/output operations, such as reading from or writing to files, network sockets, and other types of input/output resources.
+
 ## TCP
 
 TCP stands for Transmission Control Protocol. It is one of the main protocols in the Internet protocol suite, which also includes IP (Internet Protocol). Together, they are often referred to as TCP/IP.

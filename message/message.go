@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
 	"strings"
@@ -19,12 +18,17 @@ type Message struct {
 	// Reader
 	r *bufio.Reader
 	// Length
-	len int
+	size int
+	// Max bytes to read
+	maxReadSize int
 }
 
 // Returns Message from reader
-func NewMessage(reader interface{}) (*Message, error) {
+func NewMessage(reader any) (*Message, error) {
 	message := &Message{}
+
+	// TODO: Make maxReadSize configurable
+	// message.maxReadSize = 1024 * 1024 * 10 // 10 MB
 
 	// Arrange
 	switch v := reader.(type) {
@@ -49,11 +53,10 @@ func NewMessage(reader interface{}) (*Message, error) {
 	message.head = h
 
 	// Body
-	cl, _ := message.head.ContentLength()
 	message.body = NewBody(message.r, message.head.header)
 
 	// Length
-	message.len = message.head.Len() + cl
+	message.size = message.head.Size() + message.body.Size()
 
 	return message, nil
 }
@@ -87,23 +90,22 @@ func (m *Message) Reader() *bufio.Reader {
 }
 
 // Len returns the length of the message, head, and body.
-func (m *Message) Len() (int, int, int) {
+func (m *Message) Size() (int, int, int) {
 	cl, err := m.head.ContentLength()
 	if err != nil {
-		log.Println(err)
 		cl = 0
 	}
-	return m.len, m.head.Len(), cl
+	return m.size, m.head.Size(), cl
 }
 
 func (m *Message) String() string {
 	mes := m
 
 	// Message
-	mesLen, _, bodyLen := m.Len()
+	mesLen, _, bodyLen := m.Size()
 	lines := []string{
 		fmt.Sprintf("Message: %p", mes),
-		fmt.Sprintf("\t- Length: %d", mesLen),
+		fmt.Sprintf("\t- Size: %d", mesLen),
 	}
 
 	// Head
@@ -111,7 +113,7 @@ func (m *Message) String() string {
 
 	// Body
 	lines = append(lines, fmt.Sprintf("\t- Body: %p", mes.body))
-	lines = append(lines, fmt.Sprintf("\t\t- Length: %d", bodyLen))
+	lines = append(lines, fmt.Sprintf("\t\t- Size: %d", bodyLen))
 
 	// Reader
 	lines = append(lines, fmt.Sprintf("\t- Reader: %p", mes.r))
@@ -147,7 +149,7 @@ func (m *Message) Equals(other *Message) bool {
 	}
 
 	// Compare len fields
-	if m.len != other.len {
+	if m.size != other.size {
 		return false
 	}
 
@@ -156,24 +158,49 @@ func (m *Message) Equals(other *Message) bool {
 
 // Write to file
 func (m *Message) ToFile(fn string) {
+	// File stream
 	f, err := os.Create(fn)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
+
 	defer f.Close()
-	// fmt.Fprintln(f, m.String())
-	b := m.ToBytes()
-	n, err := f.Write(b)
-	if err != nil {
-		log.Println("Error writing to file:", err)
+
+	// Write head to file
+	n, err := m.head.WriteTo(f)
+	if err != nil && err != io.EOF {
+		panic(err)
 	}
-	fmt.Printf("%d bytes written to file %s\n", n, fn)
+	fmt.Printf("Sent file %d bytes.\n", n)
+
+	// Write body to file
+	n2, err := m.body.WriteTo(f)
+	if err != nil && err != io.EOF {
+		panic(err)
+	}
+	fmt.Printf("Sent file %d bytes.\n", n2)
+
+	// Write bytes to file
+	fmt.Printf("%d bytes written to file %s\n", n+n2, fn)
 }
 
 func (m *Message) ToBytes() []byte {
-	b, err := m.head.ToBytes()
-	if err != nil {
-		log.Fatal(err)
+
+	buf := bytes.NewBuffer(nil)
+
+	head, err := m.head.ToBytes()
+	if err != nil && err != io.EOF {
+		panic(err)
 	}
-	return b
+
+	body, err := m.body.ToBytes()
+	if err != nil && err != io.EOF {
+		panic(err)
+	}
+
+	buf.Write(head)
+	buf.Write([]byte("\r\n"))
+	buf.Write(body)
+
+	return buf.Bytes()
 }

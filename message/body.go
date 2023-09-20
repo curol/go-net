@@ -1,37 +1,39 @@
 package message
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
-	"log"
-	"util/ioutil"
 	"util/slice"
+	"util/stream"
 	"util/url"
 )
 
 // Body is a wrapper for the body of a message.
 type Body struct {
-	// Body is the reader stream of bytes.
-	// body io.ReadCloser
-	r io.Reader
-	// Len is the length of the body.
+	// The source of stream of bytes.
+	r *bufio.Reader
+	// Len is the size of the body.
 	// Can be -1 if length is unknown.
 	// Message Header should have `Content-Length`.
-	len int
-	// Content-Type
+	size int
+	// Content-Type of the body. Example: `text/html; charset=utf-8`
 	typ string
 	// Data is the body as a byte slice.
 	data []byte
+	// TODO: Set maxReadSize for max reading of stream
+	// maxReadSize int
 }
 
 // NewBody returns a new Body from the reader.
 func NewBody(reader io.Reader, header *Header) *Body {
 	body := new(Body)
 
-	body.r = ioutil.NoCloser(reader)
+	body.r = bufio.NewReader(reader)
 
-	body.parseHeaders(header)
+	// Parse header for content length and type
+	body.parseHeadersForLengthAndType(header)
 
 	// TODO: Read body into buffer?
 	// buffer := make([]byte, length)
@@ -43,20 +45,18 @@ func NewBody(reader io.Reader, header *Header) *Body {
 	return body
 }
 
-func (b *Body) parseHeaders(header *Header) {
+func (b *Body) parseHeadersForLengthAndType(header *Header) {
 	// Get content length
-	len, err := header.ContentLength()
+	size, err := header.ContentLength()
 	if err != nil {
-		len = 0
-		log.Println(err)
+		size = 0
 	}
-	b.len = len
+	b.size = size
 
 	// Get content type
 	conTyp, err := header.ContentType()
 	if err != nil {
 		conTyp = ""
-		log.Println(err)
 	}
 	b.typ = conTyp
 }
@@ -76,13 +76,17 @@ func (b *Body) Read(p []byte) (n int, err error) {
 
 // ToBytes returns the body as a byte slice.
 func (bo *Body) ToBytes() ([]byte, error) {
+	// TODO: MAX READ SIZE
+
 	// Create buffer
-	var b bytes.Buffer
+	var b bytes.Buffer // same as bytes.NewBuffer(nil)
+
 	// Write to buffer
 	_, err := bo.WriteTo(&b)
 	if err != nil {
 		return nil, err
 	}
+
 	return b.Bytes(), nil
 }
 
@@ -90,18 +94,25 @@ func (bo *Body) ToBytes() ([]byte, error) {
 func (bo *Body) Write(b []byte) (int, error) {
 	// NewBuffer creates and initializes a new Buffer using buf as its initial contents.
 	buf := bytes.NewBuffer(b)
+
 	// Write data to buffer
 	n, err := bo.WriteTo(buf)
 	if err != nil {
 		return 0, err
 	}
+
+	// Return bytes read and err
 	return int(n), nil
 }
 
 // WriteTo writes data to w until the buffer is drained or an error occurs.
+//
+// Which, reads from b.r and writes to w of size b.len.
 func (b *Body) WriteTo(w io.Writer) (int64, error) {
-	if b.len >= 0 {
-		return 0, fmt.Errorf("can't have len >= 0")
+
+	// Check if size set
+	if b.size <= 0 {
+		return 0, fmt.Errorf("can't have len <= 0")
 	}
 
 	// Write to buffer
@@ -110,7 +121,7 @@ func (b *Body) WriteTo(w io.Writer) (int64, error) {
 	// CopyN copies n bytes (or until an error) from src to dst
 	// Read from b.body and write to w of length b.len
 	// return io.CopyN(w, b.body, int64(b.len))
-	return ioutil.CopyReaderToWriter(w, b.r, int64(b.len))
+	return stream.CopyReaderToWriter(w, b.r, int64(b.size))
 }
 
 //**********************************************************************************************************************
@@ -129,11 +140,15 @@ func (b *Body) form(data string) (map[string][]string, error) {
 // Equals returns true if b equals other.
 func (b *Body) Equals(other *Body) bool {
 	// Compare b.len to other.len
-	if b.len != other.len {
+	if b.size != other.size {
 		return false
 	}
 
 	// Compare b.data to other.data
 	// TODO: Read b.body into b.data?
 	return slice.BytesEqual(b.data, other.data)
+}
+
+func (b *Body) Size() int {
+	return b.size
 }

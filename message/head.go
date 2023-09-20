@@ -13,7 +13,7 @@ type head struct {
 	// Header is the metadata of a message in key-value pairs.
 	header *Header
 	// Len is the length of the head.
-	len int
+	size int
 }
 
 func newHead(reader *bufio.Reader) (*head, error) {
@@ -41,7 +41,7 @@ func parseHead(reader *bufio.Reader) (*head, error) {
 		// rl:     *rl,
 		rl:     rl,
 		header: header,
-		len:    rl.len + n,
+		size:   rl.len + n,
 	}, nil
 }
 
@@ -49,8 +49,8 @@ func (h *head) ContentLength() (int, error) {
 	return h.header.ContentLength()
 }
 
-func (h *head) Len() int {
-	return h.len
+func (h *head) Size() int {
+	return h.size
 }
 
 func (h *head) RequestLine() *RequestLine {
@@ -64,7 +64,7 @@ func (h *head) Header() *Header {
 func (h *head) Strings() []string {
 	lines := []string{
 		fmt.Sprintf("\t- Head: %p", h),
-		fmt.Sprintf("\t\t- Length: %d", h.len),
+		fmt.Sprintf("\t\t- Size: %d", h.size),
 		fmt.Sprintf("\t\t- Request Line: %p", h.rl),
 		fmt.Sprintf("\t\t\t- Method: %s", h.rl.method),
 		fmt.Sprintf("\t\t\t- Path: %s", h.rl.path),
@@ -92,7 +92,7 @@ func (h *head) Protocol() string {
 
 // Equals checks if two heads are equal.
 func (h *head) Equals(other *head) bool {
-	if h.Len() != other.Len() {
+	if h.Size() != other.Size() {
 		return false
 	}
 	// Request line

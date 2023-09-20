@@ -8,7 +8,8 @@ import (
 type ResponseWriter interface {
 	Write(b []byte) (int, error)
 	WriteTo(w io.Writer) (int64, error)
-	Header() map[string]string
+	// Header() map[string]string
+	// ToBytes() ([]byte, error)
 }
 
 // Write writes b to w.
@@ -21,6 +22,7 @@ func writeMessage(w ResponseWriter, b []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// Append empty line to mark end of last line
 	return int(n), nil
 }
 

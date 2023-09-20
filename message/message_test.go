@@ -2,16 +2,14 @@ package message
 
 import (
 	"fmt"
-	"test"
 	"testing"
 	"time"
+	"util/mock"
 )
 
-var util = test.NewUtil()
-
 func TestMessageFromIOReader(t *testing.T) {
-	input := util.Mock.PostJSONRequest()
-	reader := util.Mock.ReaderFromBytes(input)
+	input := mock.PostJSONRequest()
+	reader := mock.ReaderFromBytes(input)
 	message, err := NewMessage(reader)
 	if err != nil {
 		t.Error(err)
@@ -21,10 +19,10 @@ func TestMessageFromIOReader(t *testing.T) {
 }
 
 func TestMessageFromConn(t *testing.T) {
-	input := util.Mock.PostJSONRequest()
+	input := mock.PostJSONRequest()
 
 	// Create a pair of connected net.Conn objects
-	server, client := util.Mock.Connection()
+	server, client := mock.Connection()
 
 	// Server
 	go func() {

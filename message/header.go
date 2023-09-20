@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"util/hashmap"
-	"util/ioutil"
+	"util/stream"
 )
 
 // Header is the header of a message which contains the headers.
@@ -118,7 +118,7 @@ func (h *Header) Header() map[string]string {
 func (h *Header) ReadFrom(r io.Reader) (int64, error) {
 	var read int64
 	for {
-		line, err := ioutil.ReadLine(r)
+		line, err := stream.ReadLine(r)
 		if err == io.EOF {
 			break
 		}
@@ -140,20 +140,23 @@ func (h *Header) ReadFrom(r io.Reader) (int64, error) {
 // ******************************************************
 // Write
 // ******************************************************
+
 // Write writes a sequence of headers to w in the HTTP/1.1 header format.
 func (h *Header) Write(b []byte) (int, error) {
-	// n, err := h.WriteTo(bytes.NewBuffer(b))
-	// if err != nil {
-	// 	return 0, err
-	// }
-	// return int(n), nil
-	return writeMessage(h, b)
+	n, err := h.WriteTo(bytes.NewBuffer(b))
+	if err != nil {
+		return 0, err
+	}
+	return int(n), nil
 }
 
 // WriteTo writes a sequence of headers to w in the HTTP/1.1 header format.
 func (h *Header) WriteTo(w io.Writer) (int64, error) {
 	var written int64
 	headers := h.ToStrings()
+	// Add Empty line to headers to mark end of header
+	headers = append(headers, "")
+
 	for _, line := range headers {
 		n, err := fmt.Fprintf(w, "%s\r\n", line)
 		written += int64(n)
@@ -161,14 +164,7 @@ func (h *Header) WriteTo(w io.Writer) (int64, error) {
 			return written, err
 		}
 	}
-	// for k, v := range h {
-	// 	s := fmt.Sprintf("%s: %s\r\n", k, v)
-	// 	n, err := fmt.Fprintf(w, s)
-	// 	written += int64(n)
-	// 	if err != nil {
-	// 		return written, err
-	// 	}
-	// }
+
 	return written, nil
 }
 

@@ -114,7 +114,7 @@ func ReaderFromBytes(b []byte) io.Reader {
 	return bytes.NewReader(b)
 }
 
-func WriterToBuffer() {
+func ExampleWriterToBuffer(data string) {
 	// Create a bytes.Buffer
 	var b bytes.Buffer
 
@@ -122,15 +122,15 @@ func WriterToBuffer() {
 	w := bufio.NewWriter(&b)
 
 	// Write some data to the bufio.Writer
-	w.WriteString("Hello, World!")
+	w.WriteString(data)
 
 	// Ensure all data has been written to the underlying buffer
 	w.Flush()
 
 	// Get the []byte from the bytes.Buffer
-	data := b.Bytes()
+	result := b.Bytes()
 
-	fmt.Println(string(data)) // Outputs: Hello, World!
+	fmt.Println(string(result)) // Outputs: Hello, World!
 }
 
 // TODO: Clean
