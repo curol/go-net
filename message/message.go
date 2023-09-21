@@ -45,7 +45,7 @@ func NewMessage(reader any) (*Message, error) {
 	}
 
 	// Head
-	h, err := newHead(message.r)
+	h, err := NewHead(message.r)
 	if err != nil {
 		return nil, err
 	}

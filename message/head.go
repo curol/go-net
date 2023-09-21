@@ -14,35 +14,34 @@ type head struct {
 	header *Header
 	// Len is the length of the head.
 	size int
+	//
+	reader *bufio.Reader
 }
 
-func newHead(reader *bufio.Reader) (*head, error) {
-	return parseHead(reader)
+func NewHead(reader *bufio.Reader) (*head, error) {
+	h := new(head)
+	h.reader = reader
+	err := h.parse(reader)
+	return h, err
 }
 
-func parseHead(reader *bufio.Reader) (*head, error) {
-	// Read and parse request line
-	// method, path, protocol, err := parseRequestLine(reader)
-
+func (h *head) parse(reader *bufio.Reader) error {
 	rl, err := NewRequestLine(reader)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	// Read and parse headers
 	header, n, err := NewHeader(reader)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return &head{
-		// If not a pointer, then the value is copied and the original value is not changed.
-		// *rl copies the value of rl
-		// rl:     *rl,
-		rl:     rl,
-		header: header,
-		size:   rl.len + n,
-	}, nil
+	h.rl = rl
+	h.header = header
+	h.size = rl.len + n
+
+	return nil
 }
 
 func (h *head) ContentLength() (int, error) {
