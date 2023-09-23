@@ -9,11 +9,10 @@ import (
 	"strconv"
 	"strings"
 	"util/hashmap"
-	"util/stream"
 )
 
-// Header is the header of a message which contains the headers.
-// It wraps the headers of a message as a map of strings to strings.
+// Header is the header of a message, which contains the headers.
+// It wraps the headers and raw data of a message.
 //
 // Headers can have values that contain commas.
 // According to the HTTP/1.1 specification, multiple message-header fields with the same field-name may be present in a message if and only if the entire field-value for that header field is defined as a comma-separated list.
@@ -22,40 +21,39 @@ import (
 // For Brevity, we will not be supporting headers with multiple values.
 type Header struct {
 	hashmap.HashMap
+	buf *bytes.Buffer
 }
 
 // NewHeader returns a new Header.
-func NewHeader(reader *bufio.Reader) (*Header, int, error) {
+func NewHeader(reader *bufio.Reader) (*Header, error) {
 	header := new(Header)
 	header.HashMap = hashmap.New()
 
-	// Parse
-	n, err := header.parse(reader)
-	if err != nil {
-		return nil, n, err
-	}
+	// Parse reader for headers
+	err := header.parse(reader)
 
-	// Return values
-	return header, n, nil
+	return header, err
 }
 
-func (h *Header) parse(reader *bufio.Reader) (int, error) {
+// parse parses the reader for headers.
+func (h *Header) parse(reader *bufio.Reader) error {
 	// TODO: Store each line read?
 	// lines := make([]byte, 0)
-
-	// Bytes read
-	n := 0
+	h.buf = bytes.NewBuffer(nil)
 
 	for {
 		line, err := reader.ReadString('\n')
 
-		n += len(line)
-
-		if err != nil {
-			return n, err
+		if err == io.EOF {
+			break
 		}
 
-		// lines = append(lines, []byte(line)...)
+		if err != nil {
+			return err
+		}
+
+		// Write line to buffer
+		h.buf.Write([]byte(line))
 
 		// Headers are terminated by a blank line "\r\n"
 		if line == "\r\n" {
@@ -64,18 +62,46 @@ func (h *Header) parse(reader *bufio.Reader) (int, error) {
 		}
 
 		// Split the header into name and value
-		kv := strings.SplitN(line, ": ", 2)
-		if len(kv) != 2 {
-			return n, fmt.Errorf("malformed header")
+		// kv := strings.SplitN(line, ": ", 2)
+		// if len(kv) != 2 {
+		// 	return fmt.Errorf("malformed header")
+		// }
+		k, v, err := h.parseLine(line)
+		if err != nil {
+			return err
 		}
 
-		// Add headers
-		h.Set(kv[0], kv[1])
+		// Add header
+		h.Set(k, v)
 	}
 
-	return n, nil
+	return nil
 }
 
+// parseLine parses a header line into a key and value.
+func (h *Header) parseLine(line string) (string, string, error) {
+	parts := strings.SplitN(line, ":", 2)
+	if len(parts) < 2 {
+		return "", "", errors.New("invalid header line")
+	}
+	key := strings.TrimSpace(parts[0])
+	value := strings.TrimSpace(parts[1])
+	return key, value, nil
+}
+
+// **********************************************************************************************************************
+// Getters
+// **********************************************************************************************************************
+
+// Size returns the size of the underyling data buffer.
+func (h *Header) Size() int {
+	if h.buf == nil {
+		return 0
+	}
+	return h.buf.Len()
+}
+
+// ContentLength returns the Content-Length header. If the header is not present, it returns an error.
 func (h *Header) ContentLength() (int, error) {
 	contentLength, ok := h.Get("Content-Length")
 
@@ -92,7 +118,7 @@ func (h *Header) ContentLength() (int, error) {
 	return length, nil
 }
 
-// Get the Content-Type header.
+// ContentType returns the Content-Type header. If the header is not present, it returns an error.
 //
 // Note that the Content-Type header specifies the MIME type of the request body.
 func (h *Header) ContentType() (string, error) {
@@ -103,12 +129,35 @@ func (h *Header) ContentType() (string, error) {
 	return ct, nil
 }
 
+// Header returns the header as a map of strings to strings.
 func (h *Header) Header() map[string]string {
 	return h.HashMap
 }
 
+// ToBytes returns the header as a byte slice.
+func (h *Header) ToBytes() []byte {
+	// return h.buf.Bytes()
+	strs := h.HashMap.ToStrings()
+	joinedStrs := strings.Join(strs, "\r\n")
+	s := joinedStrs + "\r\n"
+	fmt.Println(s)
+	return []byte(s)
+}
+
+// ToString returns the header as a string.
+func (h *Header) ToString() string {
+	return string(h.ToBytes())
+}
+
+func (h *Header) Clone() *Header {
+	return &Header{
+		HashMap: h.HashMap.Clone(),
+		buf:     bytes.NewBuffer(h.ToBytes()),
+	}
+}
+
 // ******************************************************
-// Read
+// Mutators
 // ******************************************************
 
 // ReadFrom reads a sequence of headers from r until io.EOF and adds them to the Header.
@@ -116,49 +165,47 @@ func (h *Header) Header() map[string]string {
 // A successful ReadFrom returns err == nil, not err == io.EOF. Because ReadFrom is defined to read from src until EOF, it does not treat an EOF from Read as an error to be reported.
 // If the header line is invalid, it returns an error
 func (h *Header) ReadFrom(r io.Reader) (int64, error) {
-	var read int64
+	buf := bytes.NewBuffer(h.ToBytes())
+	reader := bufio.NewReader(r)
+	n := int64(0)
+
 	for {
-		line, err := stream.ReadLine(r)
+		// Read
+		line, err := reader.ReadBytes('\n')
 		if err == io.EOF {
 			break
 		}
+		n += int64(len(line))
 		if err != nil {
-			return read, err
+			return int64(buf.Len()), err
 		}
-		read += int64(len(line))
-		parts := bytes.SplitN(line, []byte{':'}, 2)
-		if len(parts) < 2 {
-			return read, errors.New("invalid header line")
+		// Parse line
+		k, v, err := h.parseLine(string(line))
+		if err != nil {
+			return int64(buf.Len()), err
 		}
-		key := string(bytes.TrimSpace(parts[0]))
-		value := string(bytes.TrimSpace(parts[1]))
-		h.Set(key, value)
+		// Write to buffer
+		_, err = buf.Write(line)
+		if err != nil {
+			return int64(buf.Len()), err
+		}
+		// Add header
+		h.Set(k, v)
 	}
-	return read, nil
-}
-
-// ******************************************************
-// Write
-// ******************************************************
-
-// Write writes a sequence of headers to w in the HTTP/1.1 header format.
-func (h *Header) Write(b []byte) (int, error) {
-	n, err := h.WriteTo(bytes.NewBuffer(b))
-	if err != nil {
-		return 0, err
-	}
-	return int(n), nil
+	h.buf = buf
+	return n, nil
 }
 
 // WriteTo writes a sequence of headers to w in the HTTP/1.1 header format.
-func (h *Header) WriteTo(w io.Writer) (int64, error) {
+func (h *Header) WriteMapTo(w io.Writer) (int64, error) {
 	var written int64
-	headers := h.ToStrings()
+	writer := bufio.NewWriter(w)
+	headers := h.HashMap.ToStrings()
 	// Add Empty line to headers to mark end of header
 	headers = append(headers, "")
 
 	for _, line := range headers {
-		n, err := fmt.Fprintf(w, "%s\r\n", line)
+		n, err := fmt.Fprintf(writer, "%s\r\n", line)
 		written += int64(n)
 		if err != nil {
 			return written, err
@@ -168,14 +215,44 @@ func (h *Header) WriteTo(w io.Writer) (int64, error) {
 	return written, nil
 }
 
-// ToBytes returns the headers as a byte slice.
-func (h *Header) ToBytes() ([]byte, error) {
-	return toBytes(h)
+func (h *Header) WriteTo(w io.Writer) (int64, error) {
+	b := h.ToBytes()
+	writer := bufio.NewWriter(w)
+	n, err := writer.Write(b)
+	return int64(n), err
 }
 
-// String returns the text of the Map formatted in the same way as in the request.
-func (h *Header) ToString() string {
-	return toString(h)
+// Equals returns true if the headers are equal. An equality check is done by comparing the size of the headers and the values of the headers.
+//
+// Note that the order of the headers does not matter.
+func (h *Header) Equals(other *Header) bool {
+	if h.Size() != other.Size() {
+		return false
+	}
+
+	// for k, v := range h.HashMap {
+	// 	if v != otherHeader.HashMap[k] {
+	// 		return false
+	// 	}
+	// }
+	return h.HashMap.Equals(other.HashMap)
+}
+
+func (h *Header) EqualsBytesTo(other []byte) bool {
+	reader := bufio.NewReader(bytes.NewReader(other))
+	otherHeader, err := NewHeader(reader)
+	if err != nil {
+		return false
+	}
+	if len(h.HashMap) != len(otherHeader.HashMap) {
+		return false
+	}
+	// for k, v := range h.HashMap {
+	// 	if v != otherHeader.HashMap[k] {
+	// 		return false
+	// 	}
+	// }
+	return h.HashMap.Equals(otherHeader.HashMap)
 }
 
 // TODO: Implement Validate

@@ -24,6 +24,11 @@ func PostJSONRequest() []byte {
 	return []byte(data)
 }
 
+func HeaderRequest() []byte {
+	data := "Host: localhost:8080\r\nUser-Agent: curl/7.43.0\r\nAccept: */*\r\n"
+	return []byte(data)
+}
+
 func GetRequest() []byte {
 	data := "GET / HTTP/1.1\r\nHost: localhost:8080\r\nUser-Agent: curl/7.43.0\r\nAccept: */*\r\n" + CRLF
 	return []byte(data)
@@ -112,25 +117,6 @@ func ReaderFromString(s string) io.Reader {
 // MockNewBytesReader returns a new Reader reading from b.
 func ReaderFromBytes(b []byte) io.Reader {
 	return bytes.NewReader(b)
-}
-
-func ExampleWriterToBuffer(data string) {
-	// Create a bytes.Buffer
-	var b bytes.Buffer
-
-	// Create a bufio.Writer that writes to the bytes.Buffer
-	w := bufio.NewWriter(&b)
-
-	// Write some data to the bufio.Writer
-	w.WriteString(data)
-
-	// Ensure all data has been written to the underlying buffer
-	w.Flush()
-
-	// Get the []byte from the bytes.Buffer
-	result := b.Bytes()
-
-	fmt.Println(string(result)) // Outputs: Hello, World!
 }
 
 // TODO: Clean

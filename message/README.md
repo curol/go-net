@@ -1,6 +1,15 @@
 
 # Message
 
+## Stream
+In computer science, a stream is a sequence of data elements made available over time. **A stream can be thought of as a continuous flow of data that can be read or written in small chunks, rather than as a fixed-size block of data.**
+
+In Go, a stream is often represented using an io.Reader or io.Writer interface. An io.Reader represents a source of data that can be read in small chunks, while an io.Writer represents a destination for data that can be written in small chunks.
+
+For example, in the code you provided, buffer is a bytes.Buffer that represents a stream of bytes that can be read or written using an io.Reader or io.Writer. The bufio.Reader and bufio.Writer types are used to read and write data to the buffer stream in small chunks.
+
+Streams are often used in networking and file I/O, where data is read or written in small chunks over a potentially slow or unreliable connection. By using streams, you can avoid loading large amounts of data into memory at once, and can handle data as it becomes available.
+
 ## Head
 
 ## Body

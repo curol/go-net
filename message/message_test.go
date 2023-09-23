@@ -1,6 +1,7 @@
 package message
 
 import (
+	"bufio"
 	"fmt"
 	"testing"
 	"time"
@@ -24,15 +25,14 @@ func TestMessageFromConn(t *testing.T) {
 	// Create a pair of connected net.Conn objects
 	server, client := mock.Connection()
 
+	reader := bufio.NewReader(client)
+	writer := bufio.NewWriter(server)
+
 	// Server
 	go func() {
-		mes, err := NewMessage(server)
-		if err != nil {
-			fmt.Println("Server error:")
-			panic(err)
-		}
+		mes := NewMessageReader(reader)
 		fmt.Println("Bytes:", mes.ToBytes())
-		fmt.Println("Bytes:", string(mes.ToBytes()))
+		fmt.Println("String:", mes)
 
 		// fmt.Println("Server received", len(req.ToBytes()), "bytes")
 
@@ -52,11 +52,46 @@ func TestMessageFromConn(t *testing.T) {
 
 	// Client
 	fmt.Print("\n\n")
-	n, err := client.Write(input) // Blocks until server reads all bytes
-	fmt.Println("Client sent", n, "bytes")
+	// Write bytes from input to writer's buffer
+	n, err := writer.Write(input) // Blocks until server reads all bytes
 	if err != nil {
 		t.Log("Client error:", err)
 	}
+	// Write bytes from writer's buffer to client
+	err = writer.Flush()
+	if err != nil {
+		t.Log("Client error:", err)
+	}
+	fmt.Println("Client sent", n, "bytes")
 	client.Close() // Sends EOF to server
 	time.Sleep(15 * time.Second)
+}
+
+func TestMessageReader(t *testing.T) {
+	input := mock.PostJSONRequest()
+	reader := mock.ReaderFromBytes(input)
+	// message, err := NewMessage(reader)
+	// if err != nil {
+	// 	t.Error(err)
+	// }
+	message, err := ParseReaderToMessage(reader)
+	if err != nil {
+		t.Error(err)
+	}
+	// message.String()
+	fmt.Println(message)
+}
+
+func TestParsedBytesToMessage(t *testing.T) {
+	input := mock.PostJSONRequest()
+	// reader := mock.ReaderFromBytes(input)
+	// message, err := NewMessage(reader)
+	// if err != nil {
+	// 	t.Error(err)
+	// }
+	message, err := ParseBytesToMessage(input)
+	if err != nil {
+		t.Error(err)
+	}
+	fmt.Println(message)
 }

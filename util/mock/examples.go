@@ -9,6 +9,25 @@ import (
 	"os"
 )
 
+func ExampleWriterToBuffer(data string) {
+	// Create a bytes.Buffer
+	var b bytes.Buffer
+
+	// Create a bufio.Writer that writes to the bytes.Buffer
+	w := bufio.NewWriter(&b)
+
+	// Write some data to the bufio.Writer
+	w.WriteString(data)
+
+	// Ensure all data has been written to the underlying buffer
+	w.Flush()
+
+	// Get the []byte from the bytes.Buffer
+	result := b.Bytes()
+
+	fmt.Println(string(result)) // Outputs: Hello, World!
+}
+
 // Read the buffer in chunks of 5 bytes using a for loop.
 // In each iteration of the loop, we use reader.Peek to read the next chunk of data from the buffer without advancing the reader's position. We then print the chunk as a string using fmt.Println.
 func ExampleReadInChunks(str string) {
@@ -242,7 +261,81 @@ func ExampleReadAndWriteToFileStream(src string, dst string) {
 	}
 
 	// Flush the output buffer to ensure all data is written to the file
+	// Note that calling Flush too frequently can reduce performance, since it involves writing data to the output stream more often.
+	// It's generally best to let the buffer fill up before calling Flush, unless you need to ensure that all data has been written to the output stream immediately.
 	err = outputWriter.Flush()
+	if err != nil {
+		panic(err)
+	}
+}
+
+func ExampleStreamFromSTDIN(r io.Reader) []byte {
+	// Buffer
+	buf := bytes.NewBuffer(nil)
+
+	// Create Reader
+	reader := bufio.NewReader(r)
+
+	for {
+		// Read
+		line, err := reader.ReadString('\n')
+
+		// If err not io.EOF, panic
+		if err != nil && err != io.EOF {
+			panic(err)
+		}
+
+		// Break when finished reading
+		if err == io.EOF {
+			fmt.Println("EOF received.")
+			break
+		}
+
+		// Write to buffer
+		fmt.Println("Line:", line)
+		buf.Write([]byte(line))
+	}
+
+	return buf.Bytes()
+}
+
+func ExampleScanSTDIN() {
+	// Create a new bufio.Scanner to read from standard input
+	scanner := bufio.NewScanner(os.Stdin)
+
+	// Loop over standard input
+	for scanner.Scan() {
+		// Print the input as a string
+		fmt.Println("Text:", scanner.Text())
+	}
+
+	// Check if there was an error reading from standard input
+	if err := scanner.Err(); err != nil {
+		panic(err)
+	}
+}
+
+// ExampleCopyReaderToWriter copies the contents of a reader to a writer.
+//
+// In Go, you can use the io.Copy function to copy data from one io.Reader to another io.Writer.
+// This can be useful when you want to copy the contents of one file to another file, for example.
+func ExampleCopyReaderToWriter(r string, w string) {
+	// Open the input file for reading
+	inputFile, err := os.Open(r)
+	if err != nil {
+		panic(err)
+	}
+	defer inputFile.Close()
+
+	// Open the output file for writing
+	outputFile, err := os.Create(w)
+	if err != nil {
+		panic(err)
+	}
+	defer outputFile.Close()
+
+	// Copy the contents of the input file to the output file
+	_, err = io.Copy(outputFile, inputFile)
 	if err != nil {
 		panic(err)
 	}

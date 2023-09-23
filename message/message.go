@@ -12,6 +12,7 @@ import (
 
 // Message represents the raw request message.
 type Message struct {
+	// Head contains the headers of the message.
 	*head
 	// Body is the payload or content of the message.
 	body *Body
@@ -81,15 +82,17 @@ func (rm *Message) Header() *Header {
 	return rm.head.header
 }
 
+// Body
 func (rm *Message) Body() *Body {
 	return rm.body
 }
 
+// Reader
 func (m *Message) Reader() *bufio.Reader {
 	return m.r
 }
 
-// Len returns the length of the message, head, and body.
+// Size returns the length of the message, head, and body.
 func (m *Message) Size() (int, int, int) {
 	cl, err := m.head.ContentLength()
 	if err != nil {
@@ -98,6 +101,7 @@ func (m *Message) Size() (int, int, int) {
 	return m.size, m.head.Size(), cl
 }
 
+// String
 func (m *Message) String() string {
 	mes := m
 
@@ -126,6 +130,7 @@ func (m *Message) Read(p []byte) (n int, err error) {
 	return m.r.Read(p)
 }
 
+// Equals
 func (m *Message) Equals(other *Message) bool {
 	// TODO: Reflect?
 	// 	reflect.DeepEqual(m, other)
@@ -184,6 +189,7 @@ func (m *Message) ToFile(fn string) {
 	fmt.Printf("%d bytes written to file %s\n", n+n2, fn)
 }
 
+// ToBytes
 func (m *Message) ToBytes() []byte {
 
 	buf := bytes.NewBuffer(nil)

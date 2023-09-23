@@ -32,14 +32,14 @@ func (h *head) parse(reader *bufio.Reader) error {
 	}
 
 	// Read and parse headers
-	header, n, err := NewHeader(reader)
+	header, err := NewHeader(reader)
 	if err != nil {
 		return err
 	}
 
 	h.rl = rl
 	h.header = header
-	h.size = rl.len + n
+	h.size = rl.size + header.Size()
 
 	return nil
 }
@@ -98,10 +98,11 @@ func (h *head) Equals(other *head) bool {
 	if !h.RequestLine().Equals(other.RequestLine()) {
 		return false
 	}
+	// TODO: Check if header is equal
 	// Headers
-	if !h.Header().Equals(other.Header().HashMap) {
-		return false
-	}
+	// if !h.Header().Equals(other.Header()) {
+	// 	return false
+	// }
 	return true
 }
 
