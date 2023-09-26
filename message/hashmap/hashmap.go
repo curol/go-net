@@ -9,7 +9,7 @@ import (
 type HashMap map[string]string
 
 func New() HashMap {
-	return make(HashMap, 0)
+	return make(HashMap)
 }
 
 // Set sets the HashMap's value.
@@ -112,4 +112,9 @@ func (m HashMap) Equals(other HashMap) bool {
 		}
 	}
 	return true
+}
+
+// Join returns the HashMaps as a string joined by sep.
+func (m HashMap) Join(sep string) string {
+	return strings.Join(m.ToStrings(), sep)
 }

@@ -1,7 +1,5 @@
 POST / HTTP/1.1
-Accept: */*
-Content-Length: 35
-Host: localhost:8080
-User-Agent: curl/7.43.0
+Content-Length: 15
+Content-Type: application/json
 
-{"name":"John","age":30,"car":null}
+{"name":"John"}

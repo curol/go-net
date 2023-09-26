@@ -1,17 +1,17 @@
 go 1.21.0
 
-use ./server
+// use ./server
 
-use ./request
+// use ./request
 
 use ./message
 
-use ./router
+// use ./router
 
 use ./store
 
-use ./reader
+// use ./reader
 
-use ./writer
+// use ./writer
 
 use ./util
