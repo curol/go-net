@@ -17,7 +17,7 @@ type Response struct {
 	Status     string // status line
 	StatusCode int    // status code
 	Protocol   string
-	Header     Header
+	header     Header
 	// Body
 	Body          io.ReadCloser
 	ContentLength int
@@ -27,7 +27,7 @@ type Response struct {
 
 func NewResponse(conn net.Conn) *Response {
 	return &Response{
-		Header: NewHeader(),
+		header: NewHeader(),
 		w:      bufio.NewWriter(conn),
 		Body:   NewBody(conn),
 	}
@@ -55,13 +55,8 @@ func (r *Response) WriteTo(w io.Writer) (int64, error) {
 func (r *Response) Head() string {
 	// Head
 	statusLine := r.Status + "\r\n"      // status line
-	headers := r.Header.Join("\r\n")     // headers
+	headers := r.header.Join("\r\n")     // headers
 	return statusLine + headers + "\r\n" // head
-}
-
-// Close closes the response body.
-func (r *Response) Close() error {
-	return r.Body.Close()
 }
 
 // Write writes r to w in the HTTP/1.x server response format,
@@ -80,13 +75,35 @@ func (r *Response) Close() error {
 //	Header, values for non-canonical keys will have unpredictable behavior
 //
 // The Response Body is closed after it is sent.
-func (r *Response) Write(w io.Writer) (int64, error) {
-	// r.WriteTo(w)
-
+//
+//	func (r *Response) Write(w io.Writer) (int64, error) {
+//		// r.WriteTo(w)
+//		// TODO: Write response to w
+//		w.Write()
+//	}
+func (r *Response) WriteHeader(k string, v string) {
+	r.header.Set(k, v)
 }
 
-func (r *Response) WriteHeader(k string, v string) {
-	r.Header.Set(k, v)
+// Close closes the response body.
+func (r *Response) Close() error {
+	return r.Body.Close()
+}
+
+func (r *Response) Flush() error {
+	return r.w.Flush()
+}
+
+func (r *Response) Write(b []byte) (int, error) {
+	return r.w.Write(b)
+}
+
+func (r *Response) WriteString(s string) (int, error) {
+	return r.w.WriteString(s)
+}
+
+func (r *Response) Header() Header {
+	return r.header
 }
 
 // ReadResponse reads and returns an HTTP response from r.

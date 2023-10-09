@@ -5,25 +5,29 @@ import (
 	"message"
 )
 
-type Handler = message.Handler
+// Request is a structure that represents an HTTP request received by a server or to be sent by a client.
+type Request = message.Request
+
+// ResponseWriter is an interface that is used by an HTTP handler to construct an HTTP response.
+type ResponseWriter = message.ResponseWriter
+
+// Handler is a function that handles a client request.
+type Handler = func(message.Request, message.ResponseWriter)
 
 // Handlers is a map of handlers.
-type Handlers map[string]message.Handler
+type Handlers map[string]Handler
 
 // Router is a barbones router that maps requests to handlers.
 type Router struct {
 	handlers Handlers
 }
 
-type Request = message.Request
-
-type ResponseWriter = message.ResponseWriter
-
-// Return new Router
+// Returns a new Router
 func NewRouter() *Router {
 	router := &Router{
-		handlers: make(Handlers),
+		handlers: make(Handlers, 0),
 	}
+
 	addHandler(router, "NotFound", "/", notFoundHandler)
 	return router
 }
@@ -53,6 +57,10 @@ func (r *Router) Route(req Request, w ResponseWriter) {
 	handler(req, w)
 }
 
+// **********************************************************************************************************************
+// Default Handlers
+// **********************************************************************************************************************
+
 func notFoundHandler(req Request, w ResponseWriter) {
 	w.Write([]byte("404 Not Found"))
 }
@@ -65,7 +73,9 @@ func (r *Router) PING(path string, handler Handler) {
 	addHandler(r, "PING", path, handler)
 }
 
-// CRUD methods
+// **********************************************************************************************************************
+// CRUD
+// **********************************************************************************************************************
 func (r *Router) GET(path string, handler Handler) {
 	addHandler(r, "GET", path, handler)
 }

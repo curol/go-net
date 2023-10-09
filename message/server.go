@@ -8,22 +8,19 @@ import (
 
 // ******************************************************
 // ResponseWriter
-//
-// A ResponeWriter writes a response to a client.
 // ******************************************************
 
-// A ResponseWriter interface is used by an HTTP handler to
-// construct an HTTP response.
+// A ResponseWriter interface is used by an HTTP handler to construct an HTTP response.
 //
 // Note, a ResponseWriter may not be used after [Handler.ServeHTTP] has returned.
 type ResponseWriter interface {
 	Write(b []byte) (int, error)
-	WriteHeader()
-	Header() map[string]string
+	WriteHeader(string, string)
+	Header() Header
 }
 
 // ******************************************************
-// Handler
+// Handlers
 //
 // Handlers handle the client's request and response
 // ******************************************************
@@ -50,6 +47,7 @@ func (f HandlerFunc) ServeConn(w ResponseWriter, r *Request) {
 	f(w, r)
 }
 
+// HandleFunc registers the handler function for the given pattern.
 func HandleFunc(pattern string, handler func(ResponseWriter, *Request)) {}
 
 // ******************************************************
@@ -61,7 +59,7 @@ func HandleFunc(pattern string, handler func(ResponseWriter, *Request)) {}
 
 // Listen for connections and handle client's request
 func ListenAndServe(network string, address string, handler Handler) {
-	// Get tcp listener
+	// Listen for connections
 	listener, err := net.Listen(network, address)
 	if err != nil {
 		log.Fatal(err)
@@ -75,11 +73,11 @@ func ListenAndServe(network string, address string, handler Handler) {
 
 	// Run listener forever
 	for {
-		conn, err := listener.Accept() // wait for next connection
+		conn, err := listener.Accept() // wait for next connection and accept
 		if err != nil {
 			log.Fatal(err) // log status
 		}
-		go handleServingConn(conn, handler) // serve connection
+		go handleServingConn(conn, handler) // serve and handle connection
 	}
 }
 
@@ -97,22 +95,30 @@ func handleServingConn(conn net.Conn, handler Handler) {
 // Servers handles the client connections
 // ******************************************************
 
-// Server handles connections to clients
-type Server struct {
-	address string
-	network string
-}
+// // Server handles connections to clients
+// type Server struct {
+// 	address string
+// 	network string
+// }
 
-// Create a new server
-func NewServer(network string, address string) Server {
-	// Create new server
-	server := Server{
-		network: network,
-		address: address,
-	}
+// // Create a new server
+// func NewServer(network string, address string) Server {
+// 	// Create new server
+// 	server := Server{
+// 		network: network,
+// 		address: address,
+// 	}
+// 	return server
+// }
 
-	return server
-}
+// func (s *Server) ServeConn(w ResponseWriter, r *Request) {
+// 	// Get request
+// 	req := NewRequest(conn)
+
+// 	// Write response
+// 	res := NewResponse(conn)
+// 	res.Write(req.ToBytes())
+// }
 
 /*
 // Serve handles connection to client
