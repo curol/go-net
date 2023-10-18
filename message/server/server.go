@@ -1,54 +1,11 @@
-package message
+package server
 
 import (
 	"fmt"
 	"log"
+	"message"
 	"net"
 )
-
-// ******************************************************
-// ResponseWriter
-// ******************************************************
-
-// A ResponseWriter interface is used by an HTTP handler to construct an HTTP response.
-//
-// Note, a ResponseWriter may not be used after [Handler.ServeHTTP] has returned.
-type ResponseWriter interface {
-	Write(b []byte) (int, error)
-	WriteHeader(string, string)
-	Header() Header
-}
-
-// ******************************************************
-// Handlers
-//
-// Handlers handle the client's request and response
-// ******************************************************
-
-// A Handler responds to an HTTP request.
-type Handler interface {
-
-	// ServeHTTP should write reply headers and data to the [ResponseWriter]
-	// and then return. Returning signals that the request is finished; it
-	// is not valid to use the [ResponseWriter] or read from the
-	// [Request.Body] after or concurrently with the completion of the
-	// ServeHTTP call.
-	ServeConn(ResponseWriter, *Request)
-}
-
-// The HandlerFunc type is an adapter to allow the use of
-// ordinary functions as HTTP handlers. If f is a function
-// with the appropriate signature, HandlerFunc(f) is a
-// Handler that calls f.
-type HandlerFunc func(ResponseWriter, *Request)
-
-// ServeConn calls f(w, r).
-func (f HandlerFunc) ServeConn(w ResponseWriter, r *Request) {
-	f(w, r)
-}
-
-// HandleFunc registers the handler function for the given pattern.
-func HandleFunc(pattern string, handler func(ResponseWriter, *Request)) {}
 
 // ******************************************************
 // ListenAndServe
@@ -82,8 +39,8 @@ func ListenAndServe(network string, address string, handler Handler) {
 }
 
 func handleServingConn(conn net.Conn, handler Handler) {
-	req := NewRequest(conn)
-	res := NewResponse(conn)
+	req := message.NewRequest(conn)
+	res := message.NewResponse(conn)
 
 	// Serve connection
 	handler.ServeConn(res, req)
@@ -111,7 +68,7 @@ func handleServingConn(conn net.Conn, handler Handler) {
 // 	return server
 // }
 
-// func (s *Server) ServeConn(w ResponseWriter, r *Request) {
+// func (s *Server) ServeConn(w ResponseWriter, r *message.Request) {
 // 	// Get request
 // 	req := NewRequest(conn)
 

@@ -1,4 +1,4 @@
-package router
+package server
 
 import (
 	"fmt"
@@ -8,14 +8,8 @@ import (
 // Request is a structure that represents an HTTP request received by a server or to be sent by a client.
 type Request = message.Request
 
-// ResponseWriter is an interface that is used by an HTTP handler to construct an HTTP response.
-type ResponseWriter = message.ResponseWriter
-
-// Handler is a function that handles a client request.
-type Handler = func(message.Request, message.ResponseWriter)
-
 // Handlers is a map of handlers.
-type Handlers map[string]Handler
+type Handlers map[string]HandlerFunc
 
 // Router is a barbones router that maps requests to handlers.
 type Router struct {
@@ -32,18 +26,21 @@ func NewRouter() *Router {
 	return router
 }
 
+// HandleFunc registers the handler function for the given pattern.
+// func HandleFunc(pattern string, handler func(ResponseWriter, *message.Request)) {}
+
 // Add handler to router
-func addHandler(r *Router, method string, path string, handler Handler) {
+func addHandler(r *Router, method string, path string, handler HandlerFunc) {
 	r.handlers[method+" "+path] = handler
 }
 
 // Get handler from router
-func getHandler(r *Router, method string, path string) Handler {
+func getHandler(r *Router, method string, path string) HandlerFunc {
 	return r.handlers[method+" "+path]
 }
 
 // Route request to handler
-func (r *Router) Route(req Request, w ResponseWriter) {
+func (r *Router) Route(req *Request, w ResponseWriter) {
 	fmt.Println("Router: Routing request", req)
 
 	// Get handler
@@ -54,40 +51,40 @@ func (r *Router) Route(req Request, w ResponseWriter) {
 		handler = getHandler(r, "NotFound", "/")
 	}
 	// Call handler
-	handler(req, w)
+	handler(w, req)
 }
 
 // **********************************************************************************************************************
 // Default Handlers
 // **********************************************************************************************************************
 
-func notFoundHandler(req Request, w ResponseWriter) {
+func notFoundHandler(w ResponseWriter, req *Request) {
 	w.Write([]byte("404 Not Found"))
 }
 
-func (r *Router) NotFound(path string, handler Handler) {
+func (r *Router) NotFound(path string, handler HandlerFunc) {
 	addHandler(r, "NotFound", path, handler)
 }
 
-func (r *Router) PING(path string, handler Handler) {
+func (r *Router) PING(path string, handler HandlerFunc) {
 	addHandler(r, "PING", path, handler)
 }
 
 // **********************************************************************************************************************
 // CRUD
 // **********************************************************************************************************************
-func (r *Router) GET(path string, handler Handler) {
+func (r *Router) GET(path string, handler HandlerFunc) {
 	addHandler(r, "GET", path, handler)
 }
 
-func (r *Router) POST(path string, handler Handler) {
+func (r *Router) POST(path string, handler HandlerFunc) {
 	addHandler(r, "POST", path, handler)
 }
 
-func (r *Router) PUT(path string, handler Handler) {
+func (r *Router) PUT(path string, handler HandlerFunc) {
 	addHandler(r, "PUT", path, handler)
 }
 
-func (r *Router) DELETE(path string, handler Handler) {
+func (r *Router) DELETE(path string, handler HandlerFunc) {
 	addHandler(r, "DELETE", path, handler)
 }

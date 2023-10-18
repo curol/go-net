@@ -1,5 +1,11 @@
 // **********************************************************************************************************************
 // Request
+//
+// Request is a reader, buffer, and parser for a client requests.
+// It handles reading a client request.
+//
+// For brevity, the protocol for a message request follows a stripped down, bare bones HTTP request protocol.
+// Therefore, a message request consists of a request line, headers, and a body.
 // **********************************************************************************************************************
 package message
 
@@ -9,13 +15,14 @@ import (
 	"fmt"
 	"io"
 	"message/hashmap"
+	"message/util"
 	"os"
 	"strconv"
 	"strings"
 )
 
-// Request structures implementation of parsing, decoding, and buffering the message from a client.
-// The protocol follows a stripped down, bare bones HTTP request.
+// Request is a structure for parsed data and buffers from reading a client request.
+// It implements streaming, buffering, parsing, decoding, and the interface WriteTo.
 //
 // More specifically, it will (1) read from a reader or from a byte slice and (2) parse the request line, headers, and body.
 // Then, it will (3) buffer the request line, headers, and body.
@@ -35,28 +42,29 @@ type Request struct {
 	// Buffers
 	reqLineBuf []byte // buffer for request line
 	headersBuf []byte // buffer for headers
-	bodyBuf    []byte
+	// TODO: Use a transfer structure like Body? Right now, this is a buffer in memory. This is not ideal for large requests. Instead, use interface io.Reader because you can use a stream for large requests.
+	bodyBuf []byte // buffer for body contents
 }
 
 // NewRequest returns a new Request from a reader or byte slice.
 func NewRequest(r io.Reader) *Request {
 	// wb := bufio.NewWriter(body)
-	// src := io.NopCloser(r)
-	m, err := parseReaderToMessage(r)
+	// src := io.NopCloser(r) // TODO: Check if this is needed.
+	m, err := ReadRequest(r)
 	if err != nil {
 		panic(err)
 	}
 	return m
 }
 
-// parseBytesToMessage parses a byte slice into a Request.
+// NewRequestFromBytes parses a byte slice into a Request.
 func NewRequestFromBytes(data []byte) *Request {
 	if len(data) == 0 || data == nil {
-		return newRequest()
+		return newRequest() // return empty request
 	}
-
-	r := bufio.NewReader(bytes.NewBuffer(data))
-	return NewRequest(r)
+	newBuffer := bytes.NewBuffer(data)   // wrap data in buffer
+	reader := bufio.NewReader(newBuffer) // wrap buffer in reader
+	return NewRequest(reader)
 }
 
 func newRequest() *Request {
@@ -67,6 +75,10 @@ func newRequest() *Request {
 		headersMap: Header(hashmap.New()),
 	}
 }
+
+//######################################################################################################################
+// Read/Write
+//######################################################################################################################
 
 // WriteTo writes the buffers to w.
 func (p *Request) WriteTo(w io.Writer) (int64, error) {
@@ -105,6 +117,93 @@ func (p *Request) ToFile(path string) (int64, error) {
 	defer f.Close()
 	return p.WriteTo(f)
 }
+
+// Clone returns a copy of this Request.
+func (p *Request) Clone() *Request {
+	// Copy
+	m := newRequest()
+	m.reqLineBuf = p.reqLineBuf
+	m.headersBuf = p.headersBuf
+	m.bodyBuf = p.bodyBuf
+	m.len = p.len
+	m.method = p.method
+	m.path = p.path
+	m.protocol = p.protocol
+	m.headersMap = p.headersMap
+	m.contentType = p.contentType
+	m.contentLength = p.contentLength
+	return m
+}
+
+//######################################################################################################################
+// Mutate
+//######################################################################################################################
+
+// Reset resets the Request.
+func (p *Request) Reset() {
+	p = newRequest()
+}
+
+// Copy copies a reader to this Request.
+func (p *Request) Copy(src io.Reader) {
+	// Reset
+	p.Reset()
+	// Parse
+	m, err := parseReaderToMessage(src)
+	if err != nil {
+		panic(err)
+	}
+	// Copy
+	p.reqLineBuf = m.reqLineBuf
+	p.headersBuf = m.headersBuf
+	p.bodyBuf = m.bodyBuf
+	p.len = m.len
+	p.method = m.method
+	p.path = m.path
+	p.protocol = m.protocol
+	p.headersMap = m.headersMap
+	p.contentType = m.contentType
+	p.contentLength = m.contentLength
+}
+
+// Merge merges the other Request into this Request.
+func (r *Request) Merge(other *Request) {
+	// Copy other into this
+	if other.reqLineBuf != nil {
+		r.reqLineBuf = other.reqLineBuf
+	}
+	if other.headersBuf != nil {
+		r.headersBuf = other.headersBuf
+	}
+	if other.bodyBuf != nil {
+		r.bodyBuf = other.bodyBuf
+	}
+	if other.len != 0 {
+		r.len = other.len
+	}
+	if other.method != "" {
+		r.method = other.method
+	}
+	if other.path != "" {
+		r.path = other.path
+	}
+	if other.protocol != "" {
+		r.protocol = other.protocol
+	}
+	if other.headersMap != nil {
+		r.headersMap = other.headersMap
+	}
+	if other.contentType != "" {
+		r.contentType = other.contentType
+	}
+	if other.contentLength != 0 {
+		r.contentLength = other.contentLength
+	}
+}
+
+//######################################################################################################################
+// Logic
+//######################################################################################################################
 
 // Equals returns true if the other Request is equal to this Request.
 func (p *Request) Equals(other *Request) error {
@@ -158,54 +257,13 @@ func (p *Request) Equals(other *Request) error {
 	return nil
 }
 
-func (p *Request) Reset() {
-	p = newRequest()
-}
-
-// Copy copies the source to this Request.
-func (p *Request) Copy(src io.Reader) {
-	// Reset
-	p.Reset()
-	// Parse
-	m, err := parseReaderToMessage(src)
-	if err != nil {
-		panic(err)
-	}
-	// Copy
-	p.reqLineBuf = m.reqLineBuf
-	p.headersBuf = m.headersBuf
-	p.bodyBuf = m.bodyBuf
-	p.len = m.len
-	p.method = m.method
-	p.path = m.path
-	p.protocol = m.protocol
-	p.headersMap = m.headersMap
-	p.contentType = m.contentType
-	p.contentLength = m.contentLength
-}
-
-func (p *Request) Clone() *Request {
-	// Copy
-	m := newRequest()
-	m.reqLineBuf = p.reqLineBuf
-	m.headersBuf = p.headersBuf
-	m.bodyBuf = p.bodyBuf
-	m.len = p.len
-	m.method = p.method
-	m.path = p.path
-	m.protocol = p.protocol
-	m.headersMap = p.headersMap
-	m.contentType = p.contentType
-	m.contentLength = p.contentLength
-	return m
-}
-
 //######################################################################################################################
 // Getters
 //######################################################################################################################
 
 // String returns a string representation of the Request.
 func (p *Request) String() string {
+	// TODO: Format to return the Request as a string?
 	// lines := []string{
 	// 	fmt.Sprintf("Request"),
 	// 	fmt.Sprintf("\t- Method: %s", p.method),
@@ -333,7 +391,7 @@ func parseReaderToMessage(r io.Reader) (*Request, error) {
 	// 	return int64(n + n2), fmt.Errorf("content length too big")
 	// }
 	buf := bytes.NewBuffer(make([]byte, 0, pm.contentLength))
-	_, err = copyN(buf, reader, int64(pm.contentLength)) // copy reader to writer
+	_, err = util.CopyReaderToWriterN(buf, reader, int64(pm.contentLength)) // copy reader to writer
 	if err != nil {
 		panic(err)
 	}

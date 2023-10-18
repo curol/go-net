@@ -6,16 +6,22 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
 
+// TODO: Test multiple forms of the request Body (e.g. io.Reader, io.ReadCloser, etc.)
+// TODO: Test multiple forms of input and output
+
 func TestNewMessageFromReader(t *testing.T) {
 	// Arrange
 	expected, expectedReader, _ := mockRequest()
+
+	// Act
 	got := NewRequest(expectedReader)
 
-	// Compare expected and got
+	// Test if request `got` equals request `expected`
 	err := got.Equals(expected)
 	if err != nil {
 		t.Error(err)
@@ -52,6 +58,7 @@ func TestNewMessageFromBytes(t *testing.T) {
 func TestToFile(t *testing.T) {
 	expected, reader, expectedInput := mockRequest()
 	expectedSize := int64(len(expectedInput))
+	fn := "test/test-message.txt"
 
 	message := NewRequest(reader)
 
@@ -60,7 +67,7 @@ func TestToFile(t *testing.T) {
 	}
 
 	// Test ToFile
-	gotN, err := message.ToFile("test-message.txt")
+	gotN, err := message.ToFile(fn)
 	if err != nil {
 		t.Error(err)
 	}
@@ -71,7 +78,7 @@ func TestToFile(t *testing.T) {
 	}
 
 	// Read file
-	gotFile, err := os.ReadFile("test-message.txt")
+	gotFile, err := os.ReadFile(fn)
 	if err != nil {
 		t.Error(err)
 	}
@@ -110,6 +117,28 @@ func TestCopy(t *testing.T) {
 	}
 }
 
+func TestResponse(t *testing.T) {
+	// Arrange
+	// expected, expectedReader, expectedInput := mockResponse()
+	// got := NewRequestFromBytes(expectedInput)
+	response, responseOutput := mockResponse()
+
+	// Act
+	// got.Copy(expectedReader)
+	response.Text("Hello World!")
+
+	// Assert
+	// err := got.Equals(expected)
+	// if err != nil {
+	// 	t.Error(err)
+	// }
+	// buffer := bytes.NewBuffer(nil) // client
+	// response.WriteTo(buffer)
+	// fmt.Println("Got output:", buffer.Bytes())
+	fmt.Println("Expected output: ", responseOutput)
+
+}
+
 //**********************************************************************************************************************
 // Helpers
 //**********************************************************************************************************************
@@ -139,6 +168,8 @@ func testRequestEqualsExpected(t *testing.T, server net.Conn) {
 	server.Close()
 	fmt.Println("Server closed connection.")
 }
+
+// MockRequest returns a mock request.
 func mockRequest() (*Request, *bytes.Buffer, []byte) {
 	// input
 	reqLine := "POST / HTTP/1.1\r\n"
@@ -166,6 +197,52 @@ func mockRequest() (*Request, *bytes.Buffer, []byte) {
 	return m, reader, []byte(input)
 }
 
+func mockResponeOutput() (output string, headers map[string]string, body *bytes.Buffer, lines []string) {
+	lines = []string{
+		"HTTP/1.1 200 OK\r\n", // status
+		"Content-Length: 15\r\nContent-Type: application/json\r\n\r\n", // headers
+		"{\"name\":\"John\"}", // body
+	}
+	output = strings.Join(lines, "")
+	headers = map[string]string{"Content-Type": "application/json", "Content-Length": "15"}
+	body = bytes.NewBuffer([]byte(lines[2]))
+
+	// TODO: bufio.NewReader(buffer) ?
+
+	// create a reader for the body
+	// r := strings.NewReader("")
+	// b := bytes.NewReader([]byte(""))
+	// body := bytes.NewBuffer([]byte(bodyLine))
+	// bodyReader := bufio.NewReader(body)
+
+	return output, headers, body, lines
+}
+
+// MockResponse returns a mock response.
+func mockResponse() (*Response, []byte) {
+	output, headers, _, _ := mockResponeOutput()
+
+	// Convert string to int for content length
+	// cl, err := strconv.Atoi(headers["Content-Length"])
+	// if err != nil {
+	// 	panic(err)
+	// }
+	// fmt.Println("Content-Length:", cl)
+
+	// instance
+	m := &Response{
+		status:     "200 OK",
+		statusCode: 200,
+		protocol:   "HTTP/1.1",
+		header:     headers,
+		body:       NewBody(),
+		size:       len(output),
+	}
+
+	return m, []byte(output)
+}
+
+// MockServerRequestAndResponse mocks a server request and response.
 func mockServerRequestEqualsExpectedRequest(t *testing.T) {
 	// Create a pair of connected network connections
 	serverConn, clientConn := net.Pipe()
@@ -215,7 +292,41 @@ func mockServerRequestEqualsExpectedRequest(t *testing.T) {
 	}
 }
 
+// MockClientRequestAndResponse mocks a client request and response.
 func mockClientRequestAndResponse(t *testing.T, client net.Conn) {
+	// Mock data
+	_, _, input := mockRequest()
+
+	// Write request to buffer
+	writer := bufio.NewWriter(client)
+	n, err := writer.Write(input) // blocks until server reads all bytes
+	if err != nil {
+		t.Errorf("Error writing to buffer: %v", err)
+	}
+	fmt.Printf("\nClient wrote %d bytes to buffer.\n", n)
+	time.Sleep(3 * time.Second)
+
+	// Write request to server
+	fmt.Println("Client flushed buffer and sent", n, "bytes to server.")
+	err = writer.Flush()
+	if err != nil {
+		t.Errorf("Error flushing buffer: %v", err)
+	}
+	time.Sleep(3 * time.Second)
+
+	// Read response
+	clientReader := bufio.NewReader(client)   //
+	clientRequest := NewRequest(clientReader) //
+	time.Sleep(2 * time.Second)
+	fmt.Printf("\nClient received:\n%s\n", clientRequest)
+
+	// Close connection
+	client.Close() // sends EOF to server
+	fmt.Println("Client closed connection.")
+}
+
+// MockClientRequestEqualsExpectedResponse mocks a client request and response.
+func mockClientRequestEqualsExpectedResponse(t *testing.T, client net.Conn) {
 	// Mock data
 	_, _, input := mockRequest()
 

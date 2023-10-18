@@ -45,10 +45,10 @@ func (m HashMap) Clone() HashMap {
 	return m2
 }
 
-// Len returns the number of HashMaps.
-func (m HashMap) Len() int {
-	return len(m)
-}
+// // Len returns the number of keys.
+// func (m HashMap) Len() int {
+// 	return len(m)
+// }
 
 // Keys returns the keys of the HashMap.
 func (m HashMap) Keys() []string {
@@ -68,7 +68,7 @@ func (m HashMap) Values() []string {
 	return values
 }
 
-// Merge
+// Merge merges other into m.
 func (m HashMap) Merge(other HashMap) {
 	for k, v := range other {
 		m[k] = v
@@ -91,6 +91,22 @@ func (m HashMap) ToStrings() []string {
 		sl = append(sl, s)
 	}
 	return sl
+}
+
+// ToString returns the HashMaps as a string.
+func (m HashMap) ToString() string {
+	strs := m.ToStrings()
+	return strings.Join(strs, "\r\n")
+}
+
+// ToBytes returns the HashMaps as a byte slice.
+func (m HashMap) ToBytes() []byte {
+	return []byte(m.ToString())
+}
+
+// Size is len(hashMap.ToString())
+func (m HashMap) Size() int {
+	return len(m.ToBytes())
 }
 
 // Clear clears the HashMap.

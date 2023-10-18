@@ -97,3 +97,56 @@ Instead, it's held in a buffer, and only written when the buffer becomes full.
 This can improve performance by reducing the number of write operations.
 However, sometimes you need to ensure that all written data is sent immediately, without waiting for the buffer to fill up.
 That's when you would call Flush.
+
+## WriterTo
+GitHub Copilot: In Go, the `io.WriterTo` interface is used to write data to a destination. It is similar to the `io.Writer` interface, but instead of writing data to a stream, it writes data to another `io.Writer`.
+
+Here's an example of how to use the `io.WriterTo` interface to write data to a file:
+
+```go
+package main
+
+import (
+	"io"
+	"os"
+)
+
+type MyData struct {
+	Data string
+}
+
+func (d MyData) WriteTo(w io.Writer) (int64, error) {
+	n, err := w.Write([]byte(d.Data))
+	return int64(n), err
+}
+
+func main() {
+	// Create a new instance of MyData
+	data := MyData{Data: "Hello, world!"}
+
+	// Open a file for writing
+	file, err := os.Create("output.txt")
+	if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+
+	// Write the data to the file using WriteTo
+	_, err = data.WriteTo(file)
+	if err != nil {
+		panic(err)
+	}
+}
+```
+
+In this example, we define a custom type `MyData` that has a `WriteTo` method that implements the `io.WriterTo` interface. The `WriteTo` method takes an `io.Writer` as an argument and writes the data to the writer using `w.Write`.
+
+We then create a new instance of `MyData` and open a file for writing using `os.Create`. We write the data to the file using the `WriteTo` method of `MyData`.
+
+Note that in this example, we are writing the entire data to the file at once. In practice, you may want to write the data in smaller chunks to avoid consuming too much memory or overwhelming the destination writer.
+
+## Parsing vs Serialization
+
+The opposite of parsing is usually referred to as "serialization". Parsing is the process of analyzing a string or data structure to extract meaningful information, while serialization is the process of converting an object or data structure into a format that can be stored or transmitted.
+
+In other words, parsing is about extracting data from a structured format, while serialization is about converting data into a structured format.
