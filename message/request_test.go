@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"strings"
 	"testing"
 	"time"
 )
@@ -14,7 +13,7 @@ import (
 // TODO: Test multiple forms of the request Body (e.g. io.Reader, io.ReadCloser, etc.)
 // TODO: Test multiple forms of input and output
 
-func TestNewMessageFromReader(t *testing.T) {
+func TestRequestFromReader(t *testing.T) {
 	// Arrange
 	expected, expectedReader, _ := mockRequest()
 
@@ -28,7 +27,7 @@ func TestNewMessageFromReader(t *testing.T) {
 	}
 }
 
-func TestNewMessageFromConn(t *testing.T) {
+func TestRequestFromConn(t *testing.T) {
 	// Mock server and client connections
 	server, client := net.Pipe()
 
@@ -44,7 +43,7 @@ func TestNewMessageFromConn(t *testing.T) {
 	fmt.Println("\nFinished.")
 }
 
-func TestNewMessageFromBytes(t *testing.T) {
+func TestRequestFromBytes(t *testing.T) {
 	expected, _, input := mockRequest()
 
 	got := NewRequestFromBytes(input)
@@ -117,28 +116,6 @@ func TestCopy(t *testing.T) {
 	}
 }
 
-func TestResponse(t *testing.T) {
-	// Arrange
-	// expected, expectedReader, expectedInput := mockResponse()
-	// got := NewRequestFromBytes(expectedInput)
-	response, responseOutput := mockResponse()
-
-	// Act
-	// got.Copy(expectedReader)
-	response.Text("Hello World!")
-
-	// Assert
-	// err := got.Equals(expected)
-	// if err != nil {
-	// 	t.Error(err)
-	// }
-	// buffer := bytes.NewBuffer(nil) // client
-	// response.WriteTo(buffer)
-	// fmt.Println("Got output:", buffer.Bytes())
-	fmt.Println("Expected output: ", responseOutput)
-
-}
-
 //**********************************************************************************************************************
 // Helpers
 //**********************************************************************************************************************
@@ -197,49 +174,28 @@ func mockRequest() (*Request, *bytes.Buffer, []byte) {
 	return m, reader, []byte(input)
 }
 
-func mockResponeOutput() (output string, headers map[string]string, body *bytes.Buffer, lines []string) {
-	lines = []string{
-		"HTTP/1.1 200 OK\r\n", // status
-		"Content-Length: 15\r\nContent-Type: application/json\r\n\r\n", // headers
-		"{\"name\":\"John\"}", // body
-	}
-	output = strings.Join(lines, "")
-	headers = map[string]string{"Content-Type": "application/json", "Content-Length": "15"}
-	body = bytes.NewBuffer([]byte(lines[2]))
+func mockTextRequest() (*Request, []byte) {
+	// Client input
+	reqLine := "POST / HTTP/1.1\r\n"
+	headers := "Content-Length: 13\r\nContent-Type: text/plain\r\n\r\n"
+	body := "Hello, World!"
+	input := reqLine + headers + body
 
-	// TODO: bufio.NewReader(buffer) ?
-
-	// create a reader for the body
-	// r := strings.NewReader("")
-	// b := bytes.NewReader([]byte(""))
-	// body := bytes.NewBuffer([]byte(bodyLine))
-	// bodyReader := bufio.NewReader(body)
-
-	return output, headers, body, lines
-}
-
-// MockResponse returns a mock response.
-func mockResponse() (*Response, []byte) {
-	output, headers, _, _ := mockResponeOutput()
-
-	// Convert string to int for content length
-	// cl, err := strconv.Atoi(headers["Content-Length"])
-	// if err != nil {
-	// 	panic(err)
-	// }
-	// fmt.Println("Content-Length:", cl)
-
-	// instance
-	m := &Response{
-		status:     "200 OK",
-		statusCode: 200,
-		protocol:   "HTTP/1.1",
-		header:     headers,
-		body:       NewBody(),
-		size:       len(output),
+	// Client Request
+	r := &Request{
+		method:        "POST",
+		path:          "/",
+		protocol:      "HTTP/1.1",
+		headersMap:    map[string]string{"Content-Type": "text/plain", "Content-Length": "13"},
+		contentType:   "text/plain",
+		contentLength: 13,
+		reqLineBuf:    []byte(reqLine),
+		headersBuf:    []byte(headers),
+		bodyBuf:       []byte(body),
+		len:           len(input),
 	}
 
-	return m, []byte(output)
+	return r, r.ToBytes()
 }
 
 // MockServerRequestAndResponse mocks a server request and response.

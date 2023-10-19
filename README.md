@@ -237,3 +237,13 @@ In Go, you can use the net/http package's SetCookie function to set session cook
 ## Parsing
 
 Parsing, in the context of programming, is the process of analyzing a string of symbols, either in natural language or computer languages, according to the rules of a formal grammar. Essentially, it involves taking input data (like code or text), breaking it down, and turning it into a format that's more usable for the program.
+
+## Encoding vs Decoding
+
+Encoding and decoding are two related but opposite operations that are commonly used in computer science.
+
+Encoding is the process of converting data from one format to another. For example, encoding a string as a sequence of bytes, or encoding a data structure as a JSON string.
+
+Decoding is the opposite process of encoding. It is the process of converting data from one format back to its original format. For example, decoding a sequence of bytes back into a string, or decoding a JSON string back into a data structure.
+
+In general, encoding and decoding are used to represent data in a way that is more suitable for a particular purpose. For example, encoding data as a JSON string makes it easier to transmit over a network, while decoding the JSON string back into a data structure makes it easier to work with in a program.
