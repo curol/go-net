@@ -16,6 +16,7 @@ import (
 	"io"
 	"message/hashmap"
 	"message/util"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -44,6 +45,8 @@ type Request struct {
 	headersBuf []byte // buffer for headers
 	// TODO: Use a transfer structure like Body? Right now, this is a buffer in memory. This is not ideal for large requests. Instead, use interface io.Reader because you can use a stream for large requests.
 	bodyBuf []byte // buffer for body contents
+	// Misc
+	remoteAddress string // remote address
 }
 
 // NewRequest returns a new Request from a reader or byte slice.
@@ -55,6 +58,16 @@ func NewRequest(r io.Reader) *Request {
 		panic(err)
 	}
 	return m
+}
+
+func NewRequestFromConn(conn net.Conn) *Request {
+	// Read request from conn
+	req, err := ReadRequest(conn)
+	if err != nil {
+		panic(err)
+	}
+	req.SetRemoteAddress(conn.RemoteAddr().String())
+	return req
 }
 
 // NewRequestFromBytes parses a byte slice into a Request.
@@ -132,6 +145,7 @@ func (p *Request) Clone() *Request {
 	m.headersMap = p.headersMap
 	m.contentType = p.contentType
 	m.contentLength = p.contentLength
+	m.remoteAddress = p.remoteAddress
 	return m
 }
 
@@ -164,6 +178,7 @@ func (p *Request) Copy(src io.Reader) {
 	p.headersMap = m.headersMap
 	p.contentType = m.contentType
 	p.contentLength = m.contentLength
+	p.remoteAddress = m.remoteAddress
 }
 
 // Merge merges the other Request into this Request.
@@ -199,6 +214,13 @@ func (r *Request) Merge(other *Request) {
 	if other.contentLength != 0 {
 		r.contentLength = other.contentLength
 	}
+	if other.remoteAddress != "" {
+		r.remoteAddress = other.remoteAddress
+	}
+}
+
+func (p *Request) SetRemoteAddress(addr string) {
+	p.remoteAddress = addr
 }
 
 //######################################################################################################################
@@ -309,6 +331,9 @@ func (p *Request) ContentType() string { return p.contentType }
 
 // ContentLength returns the header Content-Length of the Request.
 func (p *Request) ContentLength() int { return p.contentLength }
+
+// RemoteAddress returns the remote address of the Request.
+func (p *Request) RemoteAddress() string { return p.remoteAddress }
 
 // ######################################################################################################################
 // Helpers

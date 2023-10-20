@@ -14,7 +14,7 @@ type Handler interface {
 	// is not valid to use the [ResponseWriter] or read from the
 	// [Request.Body] after or concurrently with the completion of the
 	// ServeHTTP call.
-	ServeConn(ResponseWriter, *message.Request)
+	ServeConn(*Response, *Request)
 }
 
 // The HandlerFunc type is an adapter to allow the use of

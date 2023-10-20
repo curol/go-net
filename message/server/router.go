@@ -2,11 +2,7 @@ package server
 
 import (
 	"fmt"
-	"message"
 )
-
-// Request is a structure that represents an HTTP request received by a server or to be sent by a client.
-type Request = message.Request
 
 // Handlers is a map of handlers.
 type Handlers map[string]HandlerFunc

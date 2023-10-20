@@ -122,7 +122,7 @@ func NewResponse(conn net.Conn) *Response {
 }
 
 //######################################################################################################################
-// Serialize/Encode
+// Encode
 //######################################################################################################################
 
 // ToBytes converts the response to a byte slice.
@@ -142,8 +142,8 @@ func (r *Response) ToString() string {
 
 // Serialize serializes the response to a byte slice.
 func (r *Response) serialize() []byte {
-	head := r.serializeHead()
-	body := r.body
+	head := r.serializeHead() // 1.) serialize head
+	body := r.body            // 2.) payload/contents
 	return append(head, body...)
 }
 
@@ -183,8 +183,8 @@ func (r *Response) WriteTo(w io.Writer) (int64, error) {
 	// 	return 0, err
 	// }
 
-	result := r.serialize()
-	n, err := w.Write(result)
+	output := r.serialize()
+	n, err := w.Write(output)
 	if err != nil {
 		return 0, err
 	}
@@ -200,6 +200,17 @@ func (r *Response) Write(b []byte) (int, error) {
 // Flush flushes the writer.
 func (r *Response) Flush() error {
 	return r.w.Flush()
+}
+
+// WriteOutput writes the serialized response to the writer and flushes the writer to the
+// connection.
+func (r *Response) WriteOutput() error {
+	output := r.serialize()   // encode the response to a byte slice
+	_, err := r.Write(output) // write the response output to the writer
+	if err != nil {
+		return err
+	}
+	return r.Flush() // flush the writer to the client connection
 }
 
 //######################################################################################################################
