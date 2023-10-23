@@ -48,10 +48,10 @@ type Request struct {
 
 	// Misc
 	// TODO
-	url  *url.URL // parsed url
-	len  int      // size of message (request line + headers + body)
-	size int      // size of message (request line + headers + body)
-	conn net.Conn // connection
+	url           *url.URL // parsed url
+	len           int      // size of message (request line + headers + body)
+	size          int      // size of message (request line + headers + body)
+	remoteAddress string
 }
 
 // NewRequest returns a new Request from a reader or byte slice.
@@ -73,7 +73,6 @@ func NewRequestFromConn(conn net.Conn) *Request {
 			panic(err)
 		}
 	}
-	req.conn = conn
 	return req
 }
 
@@ -242,12 +241,12 @@ func (r *Request) Merge(other *Request) {
 	}
 }
 
-func (p *Request) SetConnection(conn net.Conn) {
-	p.conn = conn
-}
-
 func (p *Request) SetURL(url *url.URL) {
 	p.url = url
+}
+
+func (p *Request) SetRemoteAddress(conn net.Conn) {
+	p.remoteAddress = conn.RemoteAddr().String()
 }
 
 //######################################################################################################################
@@ -383,11 +382,16 @@ func ReadRequest(r io.Reader) (*Request, error) {
 // parseReaderToMessage parses a reader into a Request.
 func parseReaderToRequest(r io.Reader) (*Request, error) {
 	reader := bufio.NewReader(r) // wrap src reader in bufio.Reader
-
 	pm := newRequest()
 	pm.r = r // set src reader
 
-	pm.size = 0
+	// TODO: Finish switch type
+	switch v := r.(type) {
+	case net.Conn:
+		pm.SetRemoteAddress(v)
+	default:
+		//
+	}
 
 	// 1.) Request line
 	// Note: First line is the request line.
@@ -429,7 +433,6 @@ func parseReaderToRequest(r io.Reader) (*Request, error) {
 		// Set header
 		pm.header.Set(parts[0], parts[1])
 	}
-
 	cl := pm.ContentLength()
 	pm.len = len(pm.RequestLine()) + len(pm.Headers()) + cl // set size
 
