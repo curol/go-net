@@ -12,6 +12,34 @@ func New() HashMap {
 	return make(HashMap)
 }
 
+func NewFromStrings(strs []string) HashMap {
+	m := make(HashMap)
+	for _, s := range strs {
+		kv := strings.SplitN(s, ":", 2)
+		if len(kv) == 2 {
+			m.Set(kv[0], kv[1])
+		}
+	}
+	return m
+}
+
+func NewFromString(s string) HashMap {
+	return NewFromStrings(strings.Split(s, "\r\n"))
+}
+
+func NewFromBytes(b []byte) HashMap {
+	return NewFromString(string(b))
+}
+
+func NewFromMap(m map[string]string) HashMap {
+	var lines []string
+	for k, v := range m {
+		line := fmt.Sprintf("%s: %s", k, v)
+		lines = append(lines, line)
+	}
+	return NewFromStrings(lines)
+}
+
 // Set sets the HashMap's value.
 func (m HashMap) Set(key, value string) {
 	k := strings.TrimSpace(key)

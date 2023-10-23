@@ -5,8 +5,6 @@
 // ******************************************************
 package server
 
-import "message"
-
 // Handler is an interface with the method ServeConn(ResponseWriter, *Request) that handles and responds to an HTTP request.
 type Handler interface {
 	// ServeHTTP should write reply headers and data to the [ResponseWriter]
@@ -15,15 +13,4 @@ type Handler interface {
 	// [Request.Body] after or concurrently with the completion of the
 	// ServeHTTP call.
 	ServeConn(*Response, *Request)
-}
-
-// The HandlerFunc type is an adapter to allow the use of
-// ordinary functions as HTTP handlers. If f is a function
-// with the appropriate signature, HandlerFunc(f) is a
-// Handler that calls f.
-type HandlerFunc func(ResponseWriter, *message.Request)
-
-// ServeConn calls f(w, r).
-func (f HandlerFunc) ServeConn(w ResponseWriter, r *message.Request) {
-	f(w, r)
 }

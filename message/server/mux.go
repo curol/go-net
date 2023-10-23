@@ -1,6 +1,6 @@
 package server
 
-// Mux implements interface Handler for handling connections.
+// Mux implements interface Handler for handling requests.
 type Mux struct{}
 
 // NewMux returns a new Mux.

@@ -11,3 +11,7 @@ type Header = hashmap.HashMap
 func NewHeader() Header {
 	return Header(hashmap.New())
 }
+
+func NewHeaderFromMap(m map[string]string) Header {
+	return Header(hashmap.NewFromMap(m))
+}

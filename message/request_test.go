@@ -159,16 +159,11 @@ func mockRequest() (*Request, *bytes.Buffer, []byte) {
 
 	// instance
 	m := &Request{
-		method:        "POST",
-		path:          "/",
-		protocol:      "HTTP/1.1",
-		headersMap:    map[string]string{"Content-Type": "application/json", "Content-Length": "15"},
-		contentType:   "application/json",
-		contentLength: 15,
-		reqLineBuf:    []byte(reqLine),
-		headersBuf:    []byte(headers),
-		bodyBuf:       []byte(body),
-		len:           len(input),
+		method:   "POST",
+		path:     "/",
+		protocol: "HTTP/1.1",
+		header:   map[string]string{"Content-Type": "application/json", "Content-Length": "15"},
+		len:      len(input),
 	}
 
 	return m, reader, []byte(input)
@@ -183,16 +178,11 @@ func mockTextRequest() (*Request, []byte) {
 
 	// Client Request
 	r := &Request{
-		method:        "POST",
-		path:          "/",
-		protocol:      "HTTP/1.1",
-		headersMap:    map[string]string{"Content-Type": "text/plain", "Content-Length": "13"},
-		contentType:   "text/plain",
-		contentLength: 13,
-		reqLineBuf:    []byte(reqLine),
-		headersBuf:    []byte(headers),
-		bodyBuf:       []byte(body),
-		len:           len(input),
+		method:   "POST",
+		path:     "/",
+		protocol: "HTTP/1.1",
+		header:   map[string]string{"Content-Type": "text/plain", "Content-Length": "13"},
+		len:      len(input),
 	}
 
 	return r, r.ToBytes()

@@ -74,6 +74,7 @@ import (
 	"io"
 	"net"
 	"strconv"
+	"strings"
 )
 
 // Response represents a bare bones HTTP response.
@@ -116,7 +117,7 @@ func NewResponse(conn net.Conn) *Response {
 		// 2.) Headers
 		header: NewHeader(), // empty header for server to write to
 		// 3.) Body
-		body: make([]byte, 0), // empty body for server to write to
+		body: make([]byte, 0), // empty buffer for body
 	}
 	return r
 }
@@ -142,9 +143,9 @@ func (r *Response) ToString() string {
 
 // Serialize serializes the response to a byte slice.
 func (r *Response) serialize() []byte {
-	head := r.serializeHead() // 1.) serialize head
-	body := r.body            // 2.) payload/contents
-	return append(head, body...)
+	buf := bytes.NewBuffer(r.serializeHead())
+	buf.Write(r.body)
+	return buf.Bytes()
 }
 
 // SerializeHead serializes the head of a response (status line + headers) to a byte slice.
@@ -170,19 +171,6 @@ func (r *Response) WriteTo(w io.Writer) (int64, error) {
 	// Serialize the head and body of the response
 	// to transfer this to the writer `w`
 	// TODO: Transfer in chunks?
-
-	// // 1.) First, write the head
-	// head := r.Head()
-	// n, err := w.Write([]byte(head))
-	// if err != nil {
-	// 	return 0, err
-	// }
-	// // 2.) Second, write the body
-	// n2, err := w.Write(r.body)
-	// if err != nil {
-	// 	return 0, err
-	// }
-
 	output := r.serialize()
 	n, err := w.Write(output)
 	if err != nil {
@@ -197,12 +185,7 @@ func (r *Response) Write(b []byte) (int, error) {
 	return r.w.Write(b)
 }
 
-// Flush flushes the writer.
-func (r *Response) Flush() error {
-	return r.w.Flush()
-}
-
-// WriteOutput writes the serialized response to the writer and flushes the writer to the
+// WriteOutput writes the serialized response to the response writer and flushes the writer to the
 // connection.
 func (r *Response) WriteOutput() error {
 	output := r.serialize()   // encode the response to a byte slice
@@ -211,6 +194,11 @@ func (r *Response) WriteOutput() error {
 		return err
 	}
 	return r.Flush() // flush the writer to the client connection
+}
+
+// Flush flushes the writer.
+func (r *Response) Flush() error {
+	return r.w.Flush()
 }
 
 //######################################################################################################################
@@ -390,23 +378,100 @@ func (p *Response) Equals(other *Response) error {
 // After that call, clients can inspect resp.Trailer to find key/value
 // pairs included in the response trailer.
 func ReadResponse(r io.Reader) (*Response, error) {
-	return nil, nil
+	// Read the response
+	resp, err := parseResponse(r)
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
-// SendChunks writes data to connection in chunks.
-func sendChunks(conn net.Conn, data []byte, chunkSize int) error {
-	// Send data in chunks
-	for i := 0; i < len(data); i += chunkSize {
-		end := i + chunkSize
-		if end > len(data) {
-			end = len(data)
-		}
-		chunk := data[i:end]
-		_, err := conn.Write(chunk)
+// ParseResponse parses the response from the reader and return a Response.
+func parseResponse(r io.Reader) (*Response, error) {
+	resp := &Response{}
+
+	reader := bufio.NewReader(r) // reader to read response
+
+	// 1.) Parse the response line
+	statusLine, err := reader.ReadBytes('\n')
+	n := len(statusLine)
+	if err != nil {
+		return nil, err
+	}
+	status := strings.TrimSpace(string(statusLine))
+	statusLines := strings.SplitN(status, " ", 3)
+	if len(statusLines) != 3 {
+		return nil, fmt.Errorf("invalid response status line: %s", status)
+	}
+	resp.protocol = strings.TrimSpace(statusLines[0])
+	resp.statusCode, err = strconv.Atoi(strings.TrimSpace(statusLines[1]))
+	if err != nil {
+		return nil, err
+	}
+	resp.statusText = strings.TrimSpace(statusLines[2])
+
+	// 2.) Parse headers
+	resp.header = NewHeader()
+	for {
+		line, err := reader.ReadString('\n') // read line
 		if err != nil {
-			return err
+			if err != io.EOF {
+				return nil, err
+			}
 		}
+		n += len(line)
+		// Headers are terminated by a blank line "\r\n"
+		if line == "\r\n" || err == io.EOF {
+			break
+		}
+		// Parse line
+		parts := strings.SplitN(line, ":", 2) // split line into key and value
+		if len(parts) < 2 {
+			return nil, fmt.Errorf("invalid header line")
+		}
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		resp.header.Set(key, value)
 	}
 
-	return nil
+	// TODO: 3.) Parse the body
+	cl, ok := resp.header.Get("Content-Length")
+	if ok {
+		l, err := strconv.Atoi(cl)
+		if err != nil {
+			return resp, fmt.Errorf("Error parsing 'Content-Length': %s", err)
+		}
+		buf := make([]byte, l)
+		n2, err := reader.Read(buf)
+		if err != nil {
+			if err != io.EOF {
+				return resp, fmt.Errorf("Error reading response: %s", err)
+			}
+			if n2 != l {
+				return resp, fmt.Errorf("read %d bytes does not match 'Content-Length: %d'", n2, l)
+			}
+		}
+		resp.body = buf
+		resp.size = n + n2
+	}
+	resp.size = n
+	return resp, nil
 }
+
+// // SendChunks writes data to connection in chunks.
+// func sendChunks(conn net.Conn, data []byte, chunkSize int) error {
+// 	// Send data in chunks
+// 	for i := 0; i < len(data); i += chunkSize {
+// 		end := i + chunkSize
+// 		if end > len(data) {
+// 			end = len(data)
+// 		}
+// 		chunk := data[i:end]
+// 		_, err := conn.Write(chunk)
+// 		if err != nil {
+// 			return err
+// 		}
+// 	}
+
+// 	return nil
+// }

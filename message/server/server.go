@@ -78,12 +78,15 @@ func (s *Server) serve(conn net.Conn) {
 	defer conn.Close() // close connection when this is finished
 
 	// Init
-	s.initConnectionProps(conn)             // set connection properties
-	req := message.NewRequestFromConn(conn) // create new request
-	res := message.NewResponse(conn)        // create new response
+	s.setConnectionProps(conn) // set connection properties
+
+	// Request
+	req := message.NewRequestFromConn(conn) // read request
 
 	// Log
-	s.log.Status(req)
+	s.log.Status(req.Path(), req.Method(), conn.RemoteAddr().String())
+
+	res := message.NewResponse(conn) // write respone
 
 	// Serve connection
 	s.handler.ServeConn(res, req)
@@ -96,80 +99,19 @@ func (s *Server) serve(conn net.Conn) {
 	}
 }
 
-func (s *Server) initConnectionProps(conn net.Conn) {
+func (s *Server) setConnectionProps(conn net.Conn) {
 	// Set read and write deadlines
 	err := conn.SetDeadline(s.config.Deadline)
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 }
 
 // Clean cleans up the server when listener is stopped
 func (s *Server) clean() {
-	s.listener.Close() // close listener
+	err := s.listener.Close() // close listener
+	if err != nil {
+		panic(err)
+	}
 	fmt.Println("Server closed")
 }
-
-/*
-## ServeHTTP Example
-```
-package main
-
-import (
-    "fmt"
-    "net/http"
-)
-
-type MyHandler struct{}
-
-func (h MyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-    fmt.Fprintf(w, "Hello, client!")
-}
-
-func main() {
-    // Create a new instance of MyHandler
-    handler := MyHandler{}
-
-    // Start the server and listen for requests
-    http.ListenAndServe(":8080", handler)
-}
-```
-
-## HTTP Server Client example
-```
-package main
-
-import (
-    "fmt"
-    "io/ioutil"
-    "net/http"
-    "strings"
-)
-
-func main() {
-    // Start the server
-    go func() {
-        http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-            fmt.Fprintf(w, "Hello, client!")
-        })
-        http.ListenAndServe(":8080", nil)
-    }()
-
-    // Send a request to the server
-    resp, err := http.Get("http://localhost:8080/")
-    if err != nil {
-        panic(err)
-    }
-    defer resp.Body.Close()
-
-    // Read the response body
-    body, err := ioutil.ReadAll(resp.Body)
-    if err != nil {
-        panic(err)
-    }
-
-    // Print the response body
-    fmt.Println(strings.TrimSpace(string(body)))
-}
-```
-*/
