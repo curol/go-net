@@ -2,7 +2,7 @@ package router
 
 import (
 	"fmt"
-	"message"
+	"gonet"
 )
 
 // Handler is an interface with the method ServeConn(ResponseWriter, *Request) that handles and responds to an HTTP request.
@@ -12,17 +12,17 @@ type Handler interface {
 	// is not valid to use the [ResponseWriter] or read from the
 	// [Request.Body] after or concurrently with the completion of the
 	// ServeHTTP call.
-	ServeConn(*message.Response, *message.Request)
+	ServeConn(*gonet.Response, *gonet.Request)
 }
 
 // The HandlerFunc type is an adapter to allow the use of
 // ordinary functions as HTTP handlers. If f is a function
 // with the appropriate signature, HandlerFunc(f) is a
 // Handler that calls f.
-type HandlerFunc func(*message.Response, *message.Request)
+type HandlerFunc func(*gonet.Response, *gonet.Request)
 
 // ServeConn calls f(w, r).
-func (f HandlerFunc) ServeConn(w *message.Response, r *message.Request) {
+func (f HandlerFunc) ServeConn(w *gonet.Response, r *gonet.Request) {
 	f(w, r)
 }
 
@@ -58,7 +58,7 @@ func getHandler(r *Router, method string, path string) HandlerFunc {
 }
 
 // Route request to handler
-func (r *Router) Route(req *message.Request, w *message.Response) {
+func (r *Router) Route(req *gonet.Request, w *gonet.Response) {
 	fmt.Println("Router: Routing request", req)
 
 	// Get handler
@@ -76,7 +76,7 @@ func (r *Router) Route(req *message.Request, w *message.Response) {
 // Default Handlers
 // **********************************************************************************************************************
 
-func notFoundHandler(w *message.Response, req *message.Request) {
+func notFoundHandler(w *gonet.Response, req *gonet.Request) {
 	w.Write([]byte("404 Not Found"))
 }
 

@@ -7,16 +7,15 @@
 // For brevity, the protocol for a message request follows a stripped down, bare bones HTTP request protocol.
 // Therefore, a message request consists of a request line, headers, and a body.
 // **********************************************************************************************************************
-package message
+package gonet
 
 import (
 	"bufio"
 	"bytes"
 	"fmt"
 	"io"
-	"message/hashmap"
-	"message/util"
-	"net"
+	"mime/multipart"
+	gonet "net"
 	"net/url"
 	"os"
 	"strconv"
@@ -31,173 +30,79 @@ import (
 //
 // Note, for brevity, the body is buffered in memory. This is not ideal for large requests.
 type Request struct {
-	// Client
-	r io.Reader // source reader provided by the client
-
 	// Request line
-	method   string // parsed method
-	path     string // parsed path
-	protocol string // parsed protocol
+	method   string   // parsed method
+	path     string   // parsed path
+	protocol string   // parsed protocol
+	url      *url.URL // parsed url
 
 	// Headers
 	header Header // contains parsed headers
 
 	// Body
-	// TODO: body - For small requests, use a buffer in memory. For large requests, use a stream.
-	body []byte // buffer for body contents
+	body          io.ReadCloser // stream for body contents which allows reading and closing connection
+	contentLength int64
+	contentType   string
 
 	// Misc
-	// TODO
-	url           *url.URL // parsed url
-	len           int      // size of message (request line + headers + body)
-	size          int      // size of message (request line + headers + body)
-	remoteAddress string
+	remoteAddress string     // address of client
+	host          string     // host address
+	form          url.Values // parsed form
+	multipartForm *multipart.Form
+	bytesRead     int64 // total bytes read
 }
 
-// NewRequest returns a new Request from a reader or byte slice.
-func NewRequest(r io.Reader) *Request {
-	// wb := bufio.NewWriter(body)
-	// src := io.NopCloser(r) // TODO: Check if this is needed.
-	m, err := ReadRequest(r)
+// NewRequest
+func NewRequest(method string, address string, headers map[string]string, body io.Reader) *Request {
+	// Create
+	req := newRequest(
+		method,
+		address,
+		headers,
+		io.NopCloser(body),
+	)
+
+	return req
+}
+
+func newRequest(method string, address string, header map[string]string, body io.ReadCloser) *Request {
+	// Default values for request instance
+	req := newDefaultRequest()
+
+	// Set Request line
+	req.SetMethod(method)
+	err := req.setURLFromAddress(address)
 	if err != nil {
 		panic(err)
 	}
-	return m
-}
 
-func NewRequestFromConn(conn net.Conn) *Request {
-	// Read request from conn
-	req, err := ReadRequest(conn)
-	if err != nil {
-		if err != io.EOF {
-			panic(err)
-		}
-	}
+	// Set headers
+	req.header.FromMap(header)
+	req.SetContentLength(getContentLength(req.header))
+	req.SetContentType(getContentType(req.header))
+
+	// Set body
+	req.SetBody(body)
+
 	return req
 }
 
-// NewRequestFromBytes parses a byte slice into a Request.
-func NewRequestFromBytes(data []byte) *Request {
-	if len(data) == 0 || data == nil {
-		return newRequest() // return empty request
-	}
-	newBuffer := bytes.NewBuffer(data)   // wrap data in buffer
-	reader := bufio.NewReader(newBuffer) // wrap buffer in reader
-	return NewRequest(reader)
-}
-
-func NewRequestFromClient(method string, url *url.URL, header Header, body []byte) *Request {
-	if body == nil {
-		body = make([]byte, 0)
-	}
-	if header == nil {
-		header = NewHeader()
-	}
-	req := newRequest()
-	req.method = method
-	req.url = url
-	req.path = url.Path
-	req.header = header
-	req.body = body
-	return req
-}
-
-func newRequest() *Request {
+func newDefaultRequest() *Request {
 	return &Request{
-		// default values
-		body:     make([]byte, 0),
-		header:   Header(hashmap.New()),
-		protocol: "HTTP/1.1",
-		method:   "",
-		path:     "",
-		len:      0,
-		url:      nil,
-		r:        nil,
+		header:        NewHeader(),
+		protocol:      "HTTP/1.1",
+		url:           nil,
+		body:          nil,
+		method:        "",
+		path:          "",
+		remoteAddress: "",
+		host:          "",
 	}
 }
-
-//######################################################################################################################
-// Read/Write
-//######################################################################################################################
-
-// WriteTo writes the buffers to w.
-func (p *Request) WriteTo(w io.Writer) (int64, error) {
-	// Head
-	n, err := w.Write(p.Head())
-	if err != nil {
-		return int64(n), err
-	}
-	// Body
-	if p.body != nil && len(p.body) > 0 {
-		n2, err := w.Write(p.body)
-		return int64(n2), err
-	}
-	return int64(n), err
-}
-
-// WriteTo writes the buffers to w.
-func (p *Request) writeTo(w io.Writer) (int64, error) {
-	// Write request line to w
-	n, err := w.Write(p.RequestLine())
-	if err != nil {
-		return int64(n), err
-	}
-	// Write headers to w
-	n2, err := w.Write(p.Headers())
-	if err != nil {
-		return int64(n + n2), err
-	}
-	// Write blank line to w to separate headers from body
-	n3, err := w.Write([]byte("\r\n"))
-	if err != nil {
-		return int64(n + n2 + n3), err
-	}
-	// Write body to w
-	n4, err := w.Write(p.body)
-	return int64(n + n2 + n3 + n4), err
-}
-
-// ToBytes returns the buffers as a byte slice.
-func (p *Request) ToBytes() []byte {
-	b := bytes.NewBuffer(nil)
-	_, err := p.WriteTo(b)
-	if err != nil {
-		panic(err)
-	}
-	return b.Bytes()
-}
-
-// ToFile writes the buffers to a file.
-func (p *Request) ToFile(path string) (int64, error) {
-	// File stream
-	f, err := os.Create(path)
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-	return p.WriteTo(f)
-}
-
-// Clone returns a copy of this Request.
-func (p *Request) Clone() *Request {
-	// Copy
-	m := newRequest()
-	m.body = p.body
-	m.len = p.len
-	m.method = p.method
-	m.path = p.path
-	m.protocol = p.protocol
-	m.header = p.header
-	return m
-}
-
-//######################################################################################################################
-// Mutate
-//######################################################################################################################
 
 // Reset resets the Request.
 func (p *Request) Reset() {
-	p = newRequest()
+	p = newDefaultRequest()
 }
 
 // Copy copies a reader to this Request.
@@ -205,17 +110,23 @@ func (p *Request) Copy(src io.Reader) {
 	// Reset
 	p.Reset()
 	// Parse
-	m, err := parseReaderToRequest(src)
-	if err != nil {
-		panic(err)
-	}
+	// other := newRequestParser(src).req
+	other := ReadRequest(src)
 	// Copy
-	p.body = m.body
-	p.len = m.len
-	p.method = m.method
-	p.path = m.path
-	p.protocol = m.protocol
-	p.header = m.header
+	p.body = other.body
+	p.method = other.method
+	p.path = other.path
+	p.protocol = other.protocol
+	p.header = other.header
+	p.contentLength = other.contentLength
+	p.contentType = other.contentType
+	p.form = other.form
+	p.bytesRead = other.bytesRead
+	p.header = other.header
+	p.host = other.host
+	p.multipartForm = other.multipartForm
+	p.remoteAddress = other.remoteAddress
+	p.url = other.url
 }
 
 // Merge merges the other Request into this Request.
@@ -223,9 +134,6 @@ func (r *Request) Merge(other *Request) {
 	// Copy other into this
 	if other.body != nil {
 		r.body = other.body
-	}
-	if other.len != 0 {
-		r.len = other.len
 	}
 	if other.method != "" {
 		r.method = other.method
@@ -239,42 +147,43 @@ func (r *Request) Merge(other *Request) {
 	if other.header != nil {
 		r.header = other.header
 	}
+	if other.contentLength != 0 {
+		r.contentLength = other.contentLength
+	}
+	if other.contentType != "" {
+		r.contentType = other.contentType
+	}
+	if other.form != nil {
+		r.form = other.form
+	}
+	if other.bytesRead != 0 {
+		r.bytesRead = other.bytesRead
+	}
+	if other.header != nil {
+		r.header = other.header
+	}
+	if other.host != "" {
+		r.host = other.host
+	}
+	if other.multipartForm != nil {
+		r.multipartForm = other.multipartForm
+	}
+	if other.remoteAddress != "" {
+		r.remoteAddress = other.remoteAddress
+	}
+	if other.url != nil {
+		r.url = other.url
+	}
 }
-
-func (p *Request) SetURL(url *url.URL) {
-	p.url = url
-}
-
-func (p *Request) SetRemoteAddress(conn net.Conn) {
-	p.remoteAddress = conn.RemoteAddr().String()
-}
-
-//######################################################################################################################
-// Logic
-//######################################################################################################################
 
 // Equals returns true if the other Request is equal to this Request.
 func (p *Request) Equals(other *Request) error {
-	// Check size
-	if p.Len() != other.Len() {
-		return fmt.Errorf("size mismatch (%d != %d)", p.Len(), other.Len())
-	}
-
-	// Request line
-	if !bytes.Equal(p.RequestLine(), other.RequestLine()) {
-		return fmt.Errorf("request line mismatch (%s != %s)", p.RequestLine(), other.RequestLine())
-	}
-
-	// Headers
-	// Don't compare the buffers because order doesn't matter.
-	// Instead, check if the other map contains the same key-value pairs and size.
-	if len(p.header) != len(other.header) {
+	if p.header.Len() != other.header.Len() {
 		return fmt.Errorf("header's size mismatch (%d != %d)", len(p.header), len(other.header))
 	}
-	for k, v := range p.header {
-		if v != other.header[k] {
-			return fmt.Errorf("header mismatch for key %s (%s != %s)", k, v, other.header[k])
-		}
+
+	if !p.header.Equals(other.header) {
+		return fmt.Errorf("header mismatch (%s != %s)", p.header, other.header)
 	}
 
 	if p.method != other.method {
@@ -289,49 +198,324 @@ func (p *Request) Equals(other *Request) error {
 		return fmt.Errorf("protocol mismatch (%s != %s)", p.protocol, other.protocol)
 	}
 
-	// Check body
-	if !bytes.Equal(p.body, other.body) {
+	if p.contentLength != other.contentLength {
+		return fmt.Errorf("content length mismatch (%d != %d)", p.contentLength, other.contentLength)
+	}
+
+	if p.contentType != other.contentType {
+		return fmt.Errorf("content type mismatch (%s != %s)", p.contentType, other.contentType)
+	}
+
+	if p.host != other.host {
+		return fmt.Errorf("host mismatch (%s != %s)", p.host, other.host)
+	}
+
+	if p.remoteAddress != other.remoteAddress {
+		return fmt.Errorf("remote address mismatch (%s != %s)", p.remoteAddress, other.remoteAddress)
+	}
+
+	if p.url != nil && other.url != nil {
+		if p.url.String() != other.url.String() {
+			return fmt.Errorf("url mismatch (%s != %s)", p.url, other.url)
+		}
+	}
+
+	if p.url == nil && other.url != nil || p.url != nil && other.url == nil {
+		return fmt.Errorf("url mismatch (%s != %s)", p.url, other.url)
+	}
+
+	if p.form == nil && other.form != nil || p.form != nil && other.form == nil {
+		return fmt.Errorf("form mismatch (%s != %s)", p.form, other.form)
+	}
+
+	if p.form.Encode() != other.form.Encode() {
+		return fmt.Errorf("form mismatch (%s != %s)", p.form.Encode(), other.form.Encode())
+	}
+
+	if p.body == nil && other.body != nil || p.body != nil && other.body == nil {
 		return fmt.Errorf("body mismatch (%s != %s)", p.body, other.body)
 	}
+
+	// TODO: Check body
+	// if !bytes.Equal(p.body, other.body) {
+	// 	return fmt.Errorf("body mismatch (%s != %s)", p.body, other.body)
+	// }
 
 	return nil
 }
 
+// Clone returns a copy of this Request.
+func (p *Request) Clone() *Request {
+	// Copy
+	r := newRequest(p.method, p.url.String(), p.header.Clone(), p.body)
+	r.host = p.host
+	r.remoteAddress = p.remoteAddress
+	r.form = p.form
+	r.multipartForm = p.multipartForm
+	return r
+}
+
 //######################################################################################################################
-// Getters
+// Serialize
 //######################################################################################################################
 
-// String returns a string representation of the Request.
-func (p *Request) String() string {
-	// TODO: Format Request as a string?
-	// lines := []string{
-	// // Request line
-	// // Headers
-	// // Body
+// Serialize serializes the request.
+//
+// Note:
+//   - if head is nil, then only the body will be serialized.
+//   - if body is nil, then only the head will be serialized.
+func (p *Request) serialize(head io.Writer, body io.Writer) (int64, error) {
+	count := int64(0)
+
+	// Head
+	if head != nil {
+		// Write request line
+		n, err := serializeRequestLine(head, p.method, p.path, p.protocol)
+		if err != nil {
+			return int64(n), err
+		}
+		count += int64(n)
+
+		//  Write headers
+		n, err = serializeHeader(head, p.header)
+		if err != nil {
+			return count, err
+		}
+		count += int64(n)
+	}
+
+	// Body
+	if body != nil {
+		n, err := p.ReadBody(body)
+		if err != nil {
+			return count, err
+		}
+		count += n
+		return count, err
+	}
+
+	return count, nil
+}
+
+//######################################################################################################################
+// Write
+//######################################################################################################################
+
+// WriteTo writes the buffers to w.
+func (p *Request) WriteTo(w io.Writer) (int64, error) {
+	return p.serialize(w, w)
+}
+
+// ReadBody reads the body of the Request.
+func (r *Request) ReadBody(w io.Writer) (int64, error) {
+	return transportBodyToWriter(r.body, w, r.contentLength)
+}
+
+//######################################################################################################################
+// Encode
+//######################################################################################################################
+
+// ToBuffer encodes the entire request into a *bytes.Buffer.
+func (p *Request) ToBuffer() (*bytes.Buffer, error) {
+	buf := bytes.NewBuffer(nil)
+	_, err := p.WriteTo(buf)
+	return buf, err
+}
+
+// ToBytes returns the buffers as a byte slice.
+func (p *Request) ToBytes() ([]byte, error) {
+	buf, err := p.ToBuffer()
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (p *Request) ToString() (string, error) {
+	buf, err := p.ToBuffer()
+	if err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+// ToFile writes the buffers to a file.
+func (p *Request) ToFile(fn string) (int64, error) {
+	// File stream
+	f, err := os.Create(fn)
+	defer f.Close()
+	if err != nil {
+		return 0, err
+	}
+	return p.WriteTo(f)
+}
+
+// BodyBuffer returns the body of the Request as a *bytes.Buffer.
+func (r *Request) BodyBuffer() (*bytes.Buffer, error) {
+	buf := bytes.NewBuffer(nil)
+	_, err := r.ReadBody(buf)
+	if err != nil {
+		return nil, err
+	}
+	return buf, nil
+}
+
+// BodyString returns the body of the Request as a string.
+func (r *Request) BodyString() (string, error) {
+	buf, err := r.BodyBuffer()
+	if err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+//######################################################################################################################
+// Mutate
+//######################################################################################################################
+
+/*
+	Body
+*/
+
+// SetBody sets the body of the Request.
+func (r *Request) SetBody(body io.ReadCloser) {
+	// TODO: switch case for body
+	// switch v := body.(type) {
+	// case io.ReadCloser:
+	// 	req.body = v
+	// 	req.closer = true
+	// default:
+	// 	req.body = newCloser(v)
+	// 	req.closer = false
 	// }
-	b := p.ToBytes()
-	return string(b)
+	r.body = body
 }
 
-// RequestLine returns the request line of the Request as a byte slice.
-func (p *Request) RequestLine() []byte {
-	return []byte(fmt.Sprintf("%s %s %s\r\n", p.method, p.path, p.protocol))
+func (r *Request) SetContentLength(length int64) {
+	r.contentLength = length
 }
 
-// Head
-func (p *Request) Head() []byte {
-	buf := bytes.NewBuffer(p.RequestLine())
-	buf.Write(p.Headers())
-	buf.WriteString("\r\n")
-	buf.WriteString("\r\n")
-	return buf.Bytes()
+func (r *Request) SetContentType(contentType string) {
+	r.contentType = contentType
+}
+
+func (r *Request) SetForm(form url.Values) {
+	r.form = form
+}
+
+func (r *Request) SetMultipartForm(form *multipart.Form) {
+	r.multipartForm = form
+}
+
+/*
+	Request Line
+*/
+
+func (r *Request) SetRequestLine(method string, path string) {
+	r.SetMethod(method)
+	r.SetPath(path)
+}
+
+func (r *Request) SetMethod(method string) {
+	r.method = strings.ToUpper(strings.TrimSpace(method))
+}
+
+func (r *Request) SetPath(path string) {
+	r.path = strings.TrimSpace(path)
+}
+
+func (r *Request) SetProtocol(protocol string) {
+	r.protocol = protocol
+}
+
+func (r *Request) SetHost(host string) {
+	r.host = host
+}
+
+/*
+	Header
+*/
+
+func (r *Request) SetHeader(header Header) {
+	r.header = header
+}
+
+func (r *Request) SetHeaderFromMap(header map[string]string) {
+	if r.header == nil || len(r.header) == 0 {
+		return
+	}
+	// Mutate header from map of strings
+	r.header.FromMap(header)
+}
+
+/*
+	URL
+*/
+
+func (r *Request) SetURL(url *url.URL) {
+	r.url = url
+}
+
+func (r *Request) setURLFromAddress(address string) error {
+	url, err := url.Parse(address)
+	if err != nil {
+		return err
+	}
+	r.url = url
+	r.path = url.Path
+	return nil
+}
+
+/*
+	Connection
+*/
+
+func (p *Request) SetRemoteAddress(s string) {
+	p.remoteAddress = s
+}
+
+func (r *Request) SetBytesRead(n int64) {
+	r.bytesRead = n
+}
+
+// ######################################################################################################################
+// Getters
+// ######################################################################################################################
+func (r *Request) Form() url.Values {
+	return r.form
+}
+
+func (r *Request) MultipartForm() *multipart.Form {
+	return r.multipartForm
 }
 
 // Body returns the body of the Request as a byte slice.
-func (p *Request) Body() []byte { return p.body }
+func (r *Request) Body() io.ReadCloser {
+	return r.body
+}
 
-// Headers returns the headers of the Request as a byte slice.
-func (p *Request) Headers() []byte { return []byte(p.header.ToBytes()) }
+// ContentType returns the content type of the Request.
+func (p *Request) ContentType() string {
+	return p.contentType
+}
+
+// ContentLength returns the content length of the Request.
+func (p *Request) ContentLength() int64 { return p.contentLength }
+
+// ContentLengthString returns the content length as a string.
+func (p *Request) ContentLengthString() string { return strconv.Itoa(int(p.contentLength)) }
+
+func (r *Request) RequestLine() string {
+	buf := bytes.NewBuffer(nil)
+	serializeRequestLine(buf, r.method, r.path, r.protocol)
+	return buf.String()
+}
+
+// String returns a string representation of the Request.
+func (p *Request) String() string {
+	s, _ := p.ToString()
+	return s
+}
 
 // Header returns the headers as a map of the Request.
 func (p *Request) Header() map[string]string { return p.header }
@@ -345,29 +529,6 @@ func (p *Request) Path() string { return p.path }
 // Protocol returns the protocol of the Request.
 func (p *Request) Protocol() string { return p.protocol }
 
-// Len returns the size of the Request.
-func (p *Request) Len() int { return p.len }
-
-func (p *Request) ContentLengthString() string { return strconv.Itoa(p.ContentLength()) }
-
-func (p *Request) ContentLength() int {
-	cl, ok := p.header.Get("Content-Length")
-	if !ok || cl == "" {
-		return 0
-	}
-	v, err := strconv.Atoi(cl)
-	if err != nil {
-		return 0
-	}
-	return v
-}
-
-// ContentType returns the header Content-Type of the Request.
-func (p *Request) ContentType() string {
-	ct, _ := p.header.Get("Content-Type")
-	return ct
-}
-
 func (p *Request) URL() *url.URL { return p.url }
 
 // ######################################################################################################################
@@ -375,124 +536,70 @@ func (p *Request) URL() *url.URL { return p.url }
 // ######################################################################################################################
 
 // ReadRequest reads a request from a reader.
-func ReadRequest(r io.Reader) (*Request, error) {
-	return parseReaderToRequest(r)
+//
+// Examples:
+//
+//	1.) Raw request bytes:
+//	 	```
+//		data := []byte("GET / HTTP/1.1\r\nHost: localhost:8080\r\n\r\n")
+//	 	newBuffer := bytes.NewBuffer(data)   // wrap data in buffer
+//		reader := bufio.NewReader(newBuffer) // wrap buffer in reader
+//		req, _ := ReadRequest(reader)
+//	 	```
+func ReadRequest(r io.Reader) *Request {
+	req, n, err := parseRequest(r)
+	if err != nil && err != io.EOF {
+		panic(err)
+	}
+	req.SetBytesRead(n)
+	return req
 }
 
 // parseReaderToMessage parses a reader into a Request.
-func parseReaderToRequest(r io.Reader) (*Request, error) {
-	reader := bufio.NewReader(r) // wrap src reader in bufio.Reader
-	pm := newRequest()
-	pm.r = r // set src reader
-
-	// TODO: Finish switch type
-	switch v := r.(type) {
-	case net.Conn:
-		pm.SetRemoteAddress(v)
-	default:
-		//
+func parseRequest(r io.Reader) (*Request, int64, error) {
+	if r == nil {
+		return newDefaultRequest(), 0, nil
 	}
+	reader := bufio.NewReader(r)
+	req := newDefaultRequest()
 
 	// 1.) Request line
-	// Note: First line is the request line.
-	rl, err := reader.ReadString('\n') // read first line
-	if err != nil && err != io.EOF {
-		return nil, err
+	rl, err := parseRequestLine(reader)
+	if err != nil {
+		return nil, 0, fmt.Errorf("Error parsing request line: %s", err)
 	}
-	parts := strings.SplitN(rl, " ", 3) // split first line into method, path, and protocol
-	if len(parts) != 3 {
-		return nil, fmt.Errorf("invalid request line")
-	}
-	pm.method = strings.TrimSpace(parts[0])
-	pm.path = strings.TrimSpace(parts[1])
-	pm.protocol = strings.TrimSpace(parts[2])
-	pm.size = len(rl)
+	req.SetMethod(rl.method)
+	req.SetPath(rl.path)
 
 	// 2.) Headers
-	// Read each new line until a blank line ("\r\n") is reached.
-	pm.header = NewHeader()
-	for {
-		// Read line
-		line, err := reader.ReadString('\n') // read line
-		// Check error
-		if err != nil {
-			if err != io.EOF {
-				return nil, err
-			}
-		}
-		pm.size += len(line) // add read size
-		// Break if blank line of EOF is reached
-		if line == "\r\n" || err == io.EOF { // headers are terminated by a blank line "\r\n"
-			break
-		}
-		// parse line
-		parts := strings.SplitN(line, ":", 2) // split line into key and value
-		if len(parts) < 2 {
-			return nil, fmt.Errorf("invalid header line")
-		}
-		// Set header
-		pm.header.Set(parts[0], parts[1])
-	}
-	cl := pm.ContentLength()
-	pm.len = len(pm.RequestLine()) + len(pm.Headers()) + cl // set size
-
-	// 3.) Body
-	// One more read call to get body contents
-	//
-	// TODO: Check if size is too big for MaxReadSize and MaxWriteSize
-	// Write body to w
-	// if p.contentLength > MaxReadSize {
-	// 	return int64(n + n2), fmt.Errorf("content length too big")
-	// }
-	buf := bytes.NewBuffer(make([]byte, 0, cl))
-	_, err = util.CopyReaderToWriterN(buf, reader, int64(cl)) // copy reader to writer
+	ph, err := parseHeaders(reader)
 	if err != nil {
-		if err != io.EOF {
-			panic(err)
+		return nil, 0, fmt.Errorf("Error parsing request headers: %s", err)
+	}
+	req.SetHeader(ph.header)
+
+	/// 3.) Body
+	pb, err := parseBody(req.header, reader)
+	req.SetBody(pb.body)
+	req.SetContentLength(pb.len)
+	req.SetContentType(pb.typ)
+
+	// 4.) Check type of r and arrange accordingly
+	switch v := r.(type) {
+	case gonet.Conn:
+		pc, err := parseConnection(v)
+		if err != nil {
+			return nil, 0, fmt.Errorf("Error parsing request connection: %s", err)
 		}
-	}
-	pm.size += cl         // add size of body
-	pm.body = buf.Bytes() // set body buf
-	return pm, nil
-}
-
-func parseReqLine(protocol string, method string, path string) (string, error) {
-	method = strings.ToUpper(strings.TrimSpace(method))
-	path = strings.TrimSpace(path)
-	protocol = strings.TrimSpace(protocol)
-
-	// Validate method
-	switch method {
-	case "GET":
-		//
-		break
-	case "POST":
-		//
-		break
-	case "PUT":
-		//
-		break
-	case "DELETE":
-		//
-		break
-	case "HEAD":
-		//
-		break
-	case "OPTIONS":
-		//
-		break
-	case "TRACE":
-		//
-		break
-	case "CONNECT":
-		//
-		break
+		req.SetRemoteAddress(pc.remoteAddress)
+		req.SetURL(pc.url)
+		req.SetHost(pc.host)
 	default:
-		return "", fmt.Errorf("Invalid method: %s", method)
+		// TODO: finished default case
 	}
 
-	// <method> <path> HTTP/1.1\r\n
-	s := fmt.Sprintf("%s %s %s\r\n", method, path, protocol)
+	// 5. Total bytes read
+	n := (int64(rl.len + ph.len))
 
-	return s, nil
+	return req, n, nil
 }

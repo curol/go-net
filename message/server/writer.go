@@ -1,6 +1,6 @@
 package server
 
-import "message"
+import "gonet"
 
 // A ResponseWriter interface is used by an HTTP handler to construct an HTTP response.
 //
@@ -8,5 +8,5 @@ import "message"
 type ResponseWriter interface {
 	Write(b []byte) (int, error)
 	WriteHeader(string, string)
-	Header() message.Header
+	Header() gonet.Header
 }

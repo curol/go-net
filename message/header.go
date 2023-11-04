@@ -1,6 +1,8 @@
-package message
+package gonet
 
-import "message/hashmap"
+import (
+	"gonet/hashmap"
+)
 
 // Header is the metadata of the request or response.
 //
@@ -9,9 +11,9 @@ type Header = hashmap.HashMap
 
 // NewHeader creates a new Header.
 func NewHeader() Header {
-	return Header(hashmap.New())
+	return Header(hashmap.New(nil))
 }
 
 func NewHeaderFromMap(m map[string]string) Header {
-	return Header(hashmap.NewFromMap(m))
+	return Header(hashmap.New(m))
 }

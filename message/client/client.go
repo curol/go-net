@@ -2,8 +2,8 @@ package client
 
 import (
 	"fmt"
+	"gonet"
 	"io"
-	"message"
 	"net"
 	"net/url"
 	_url "net/url"
@@ -14,14 +14,14 @@ type ClientConfig struct {
 	Method  string
 	Address string
 	Header  map[string]string
-	Body    []byte
+	Body    io.Reader
 }
 
 type config struct {
 	Method string
 	URL    *url.URL
-	Header message.Header
-	Body   []byte
+	Header gonet.Header
+	Body   io.Reader
 }
 
 func newConfig(cr *ClientConfig) *config {
@@ -32,7 +32,7 @@ func newConfig(cr *ClientConfig) *config {
 	return &config{
 		Method: cr.Method,
 		URL:    url,
-		Header: message.NewHeaderFromMap(cr.Header),
+		Header: gonet.NewHeaderFromMap(cr.Header),
 		Body:   cr.Body,
 	}
 }
@@ -41,11 +41,11 @@ type Client struct {
 	network  string
 	protocol string
 	*config
-	conn net.Conn          // connection to server
-	reqN int64             // number of bytes written
-	resN int64             // number of bytes read
-	req  *message.Request  // request
-	res  *message.Response // response
+	conn net.Conn        // connection to server
+	reqN int64           // number of bytes written
+	resN int64           // number of bytes read
+	req  *gonet.Request  // request
+	res  *gonet.Response // response
 }
 
 func NewClient(config *ClientConfig) *Client {
@@ -72,7 +72,7 @@ func (c *Client) connect() {
 
 // WriteRequest writes the request to the server.
 func (c *Client) writeRequest() {
-	req := message.NewRequestFromClient(c.Method, c.URL, c.Header, c.Body)
+	req := gonet.NewRequestFromClient(c.Method, c.URL, c.Header, c.Body)
 	n, err := req.WriteTo(c.conn) // write request
 	if err != nil {
 		if err != io.EOF {
@@ -85,7 +85,7 @@ func (c *Client) writeRequest() {
 
 // ReadResponse reads the response from the server.
 func (c *Client) readResponse() {
-	resp, err := message.ReadResponse(c.conn) // read response
+	resp, err := gonet.ReadResponse(c.conn) // read response
 	if err != nil {
 		if err != io.EOF {
 			panic(err)

@@ -238,6 +238,14 @@ In Go, you can use the net/http package's SetCookie function to set session cook
 
 Parsing, in the context of programming, is the process of analyzing a string of symbols, either in natural language or computer languages, according to the rules of a formal grammar. Essentially, it involves taking input data (like code or text), breaking it down, and turning it into a format that's more usable for the program.
 
+## Serialization
+
+Serialization of a struct is the process of converting a structured data type (such as a struct) into a format that can be transmitted or stored, such as a byte slice or a string. The serialized data can then be transmitted over a network, stored in a file, or sent to another program.
+
+In the context of the excerpt you provided, the `serializeHead` method of the `Response` struct serializes the head of an HTTP response (the status line and headers) to a byte slice. The serialized data can then be sent over a network to a client that requested the response.
+
+Serialization is often used in distributed systems and network programming, where data needs to be transmitted between different systems or processes. The serialized data can be transmitted in a platform-independent format, allowing systems with different architectures or programming languages to communicate with each other.
+
 ## Encoding vs Decoding
 
 Encoding and decoding are two related but opposite operations that are commonly used in computer science.
@@ -247,3 +255,45 @@ Encoding is the process of converting data from one format to another. For examp
 Decoding is the opposite process of encoding. It is the process of converting data from one format back to its original format. For example, decoding a sequence of bytes back into a string, or decoding a JSON string back into a data structure.
 
 In general, encoding and decoding are used to represent data in a way that is more suitable for a particular purpose. For example, encoding data as a JSON string makes it easier to transmit over a network, while decoding the JSON string back into a data structure makes it easier to work with in a program.
+
+## Cookie
+GitHub Copilot: HTTP cookies are small pieces of data that are sent from a web server to a client (usually a web browser) and stored on the client's computer. Cookies are used to maintain state between requests in a stateless protocol like HTTP.
+
+When a client sends an HTTP request to a server, it can include any cookies that were previously set by the server for that domain. The server can then use the cookies to identify the client and maintain state between requests.
+
+Cookies can have various attributes, such as a name, a value, an expiration time, a domain, a path, and a secure flag. The name and value are used to store data, while the other attributes control how the cookie is transmitted and stored.
+
+Cookies can be used for various purposes, such as session management, user tracking, and personalization. However, cookies can also be used for tracking and advertising purposes, which has led to concerns about privacy and security.
+
+Web browsers typically allow users to view and delete cookies, and some browsers also allow users to block cookies entirely or only accept cookies from certain domains.
+
+### Response Example
+
+GitHub Copilot: Here's an example of a raw HTTP response with a cookie:
+
+```
+HTTP/1.1 200 OK
+Content-Type: text/plain
+Set-Cookie: mycookie=value; Path=/; Domain=example.com; Expires=Wed, 21 Oct 2021 07:28:00 GMT; Max-Age=3600; Secure
+Content-Length: 13
+
+Hello, world!
+```
+
+In this example, the response has a status line "HTTP/1.1 200 OK". The `Content-Type` header is set to "text/plain", indicating that the response body is plain text. The `Set-Cookie` header sets a cookie with a name "mycookie", a value "value", and various attributes such as `Path`, `Domain`, `Expires`, `Max-Age`, and `Secure`. The `Content-Length` header is set to 13, indicating that the response body has 13 bytes.
+
+The response body is "Hello, world!", which is 13 bytes long and matches the `Content-Length` header.
+
+### Request Example
+
+GitHub Copilot: Here's an example of a raw HTTP request with a cookie:
+
+```
+GET / HTTP/1.1
+Host: example.com
+Cookie: mycookie=value; othercookie=othervalue
+```
+
+In this example, the request is a GET request for the root path ("/") of the "example.com" domain. The `Host` header is set to "example.com", indicating the domain of the request. The `Cookie` header sets two cookies: "mycookie" with a value "value" and "othercookie" with a value "othervalue".
+
+Note that the `Cookie` header can contain multiple cookies separated by semicolons. Each cookie is a name-value pair separated by an equals sign. The name and value are both URL-encoded.

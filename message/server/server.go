@@ -2,15 +2,15 @@ package server
 
 import (
 	"fmt"
+	"gonet"
 	"log"
-	"message"
 	"net"
 )
 
 // Request is a structure that represents an HTTP request received by a server or to be sent by a client.
-type Request = message.Request
+type Request = gonet.Request
 
-type Response = message.Response
+type Response = gonet.Response
 
 func Run(address string) {
 	// Config
@@ -80,23 +80,26 @@ func (s *Server) serve(conn net.Conn) {
 	// Init
 	s.setConnectionProps(conn) // set connection properties
 
-	// Request
-	req := message.NewRequestFromConn(conn) // read request
+	// Read Request
+	req := gonet.NewRequestFromConn(conn) // read request
 
 	// Log
 	s.log.Status(req.Path(), req.Method(), conn.RemoteAddr().String())
 
-	res := message.NewResponse(conn) // write respone
+	// Response
+	res := gonet.NewResponse(conn) // write respone
 
-	// Serve connection
+	// Handler
 	s.handler.ServeConn(res, req)
 
-	// TODO: After handler finishes, serialize response?
-	// TODO: After handler finishes, flush ResponseWriter?
-	err := res.WriteOutput()
+	// Write response
+	_, err := res.WriteOutput() // write response output to its writer `w`
 	if err != nil {
 		panic(err)
 	}
+	// TODO: After handler finishes, serialize response?
+	// TODO: After handler finishes, flush ResponseWriter?
+
 }
 
 func (s *Server) setConnectionProps(conn net.Conn) {
