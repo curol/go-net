@@ -1,6 +1,47 @@
-# go-net
+# Net
 
-go-net is an golang net playground.
+Package network is an experimental package for network I/O.
+
+## Connection
+
+A network connection often refers to the communication link between two programs running on the network. This connection allows the programs to exchange data.
+
+There are various protocols that govern how this data exchange happens, such as TCP (Transmission Control Protocol) and UDP (User Datagram Protocol). These protocols define rules for how the data should be packaged, addressed, transmitted, routed, and received at the destination.
+
+A network connection can be established using various methods, such as sockets in many programming languages. Once a connection is established, data can be sent back and forth until the connection is closed.
+
+## Everything is a file
+
+In Unix and Unix-like operating systems, including Linux, there's a concept that "everything is a file". This means that all I/O devices, including network connections, are treated as files. You can read from and write to a network connection using the same system calls (read, write, etc.) that you would use for regular files.
+
+However, a network connection is not a file in the traditional sense. It doesn't have a size, you can't seek in it, and reading from or writing to it has side effects (like sending or receiving data over the network). But from a programming perspective, it's often treated like a file because you can use file-like operations to interact with it.
+
+In many programming languages, including Go, network connections are represented by objects or data structures that provide file-like methods. For example, in Go, the net.Conn interface provides Read and Write methods for network I/O, similar to the os.File type for file I/O.
+
+## TCP
+
+TCP (Transmission Control Protocol) is one of the main protocols in the Internet protocol suite. It's a transport layer protocol that provides reliable, ordered, and error-checked delivery of a stream of bytes between applications running on hosts communicating over an IP network.
+
+TCP is used by many popular application layer protocols, such as HTTP, HTTPS, FTP, SMTP, and more. It's connection-oriented, meaning it requires a connection to be established before data can be sent. This is in contrast to connectionless protocols like UDP, which don't require a connection.
+
+## Text Protocol
+
+A text protocol network connection is a type of network connection where the communication between the client and the server is done using human-readable text strings. This is in contrast to binary protocols, where communication is done using binary data that is not directly readable by humans.
+
+Examples of text protocols include HTTP, SMTP, FTP, and IRC. These protocols use text commands and responses to communicate between the client and the server. For example, in HTTP, a client might send a text command like `GET /index.html HTTP/1.1` to request a web page from a server.
+
+Text protocols have the advantage of being easy to debug and understand, since you can read the commands and responses directly. However, they can be less efficient than binary protocols, since text data is larger and slower to process than binary data.
+
+## Packages
+
+### Internal Packages
+
+The internal keyword in Go is a special directory name that restricts the accessibility of the packages inside it.
+Packages inside an internal directory can only be imported and used by the code that is in the same parent directory.
+
+The internal package is mainly used for internal implementation details that are shared across multiple packages within the parent package.
+
+In the case of net/internal, it contains implementation details and helper functions that are used by other packages within the net package, but are not intended to be directly used by programs that import the net package. This is a way to hide implementation details and prevent them from becoming part of the package's public API.
 
 ## Read File
 

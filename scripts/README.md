@@ -1,0 +1,1 @@
+This directory contains scripts like shell scripts for setup or deployment.
