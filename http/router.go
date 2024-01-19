@@ -1,28 +1,28 @@
-package router
+package http
 
 import (
+	"bytes"
 	"fmt"
-	"gonet"
 )
 
-// Handler is an interface with the method ServeConn(ResponseWriter, *Request) that handles and responds to an HTTP request.
-type Handler interface {
+// HandlerInterface is an interface with the method ServeConn(ResponseWriter, *Request) that handles and responds to an HTTP request.
+type HandlerInterface interface {
 	// ServeHTTP should write reply headers and data to the [ResponseWriter]
 	// and then return. Returning signals that the request is finished; it
 	// is not valid to use the [ResponseWriter] or read from the
 	// [Request.Body] after or concurrently with the completion of the
 	// ServeHTTP call.
-	ServeConn(*gonet.Response, *gonet.Request)
+	ServeConn(*Response, *Request)
 }
 
 // The HandlerFunc type is an adapter to allow the use of
 // ordinary functions as HTTP handlers. If f is a function
 // with the appropriate signature, HandlerFunc(f) is a
 // Handler that calls f.
-type HandlerFunc func(*gonet.Response, *gonet.Request)
+type HandlerFunc func(*Response, *Request)
 
 // ServeConn calls f(w, r).
-func (f HandlerFunc) ServeConn(w *gonet.Response, r *gonet.Request) {
+func (f HandlerFunc) ServeConn(w *Response, r *Request) {
 	f(w, r)
 }
 
@@ -58,11 +58,12 @@ func getHandler(r *Router, method string, path string) HandlerFunc {
 }
 
 // Route request to handler
-func (r *Router) Route(req *gonet.Request, w *gonet.Response) {
+func (r *Router) Route(req *Request, w *Response) {
 	fmt.Println("Router: Routing request", req)
 
 	// Get handler
-	handler := getHandler(r, req.Method(), req.Path())
+	// TODO: Which path to use req.URL or req.RequestURI?
+	handler := getHandler(r, req.Method, req.URL.Path)
 	if handler == nil {
 		// Not found
 		fmt.Println("Route not found.")
@@ -76,8 +77,9 @@ func (r *Router) Route(req *gonet.Request, w *gonet.Response) {
 // Default Handlers
 // **********************************************************************************************************************
 
-func notFoundHandler(w *gonet.Response, req *gonet.Request) {
-	w.Write([]byte("404 Not Found"))
+func notFoundHandler(w *Response, r *Request) {
+	s := bytes.NewBuffer([]byte("404 Not Found"))
+	w.Write(s)
 }
 
 func (r *Router) NotFound(path string, handler HandlerFunc) {

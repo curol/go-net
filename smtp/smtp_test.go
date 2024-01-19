@@ -10,11 +10,9 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
-	"internal/testenv"
 	"io"
 	"net"
 	"net/textproto"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -947,28 +945,28 @@ AUTH PLAIN AHVzZXIAcGFzcw==
 QUIT
 `
 
-func TestTLSClient(t *testing.T) {
-	if runtime.GOOS == "freebsd" || runtime.GOOS == "js" || runtime.GOOS == "wasip1" {
-		testenv.SkipFlaky(t, 19229)
-	}
-	ln := newLocalListener(t)
-	defer ln.Close()
-	errc := make(chan error)
-	go func() {
-		errc <- sendMail(ln.Addr().String())
-	}()
-	conn, err := ln.Accept()
-	if err != nil {
-		t.Fatalf("failed to accept connection: %v", err)
-	}
-	defer conn.Close()
-	if err := serverHandle(conn, t); err != nil {
-		t.Fatalf("failed to handle connection: %v", err)
-	}
-	if err := <-errc; err != nil {
-		t.Fatalf("client error: %v", err)
-	}
-}
+// func TestTLSClient(t *testing.T) {
+// 	if runtime.GOOS == "freebsd" || runtime.GOOS == "js" || runtime.GOOS == "wasip1" {
+// 		testenv.SkipFlaky(t, 19229)
+// 	}
+// 	ln := newLocalListener(t)
+// 	defer ln.Close()
+// 	errc := make(chan error)
+// 	go func() {
+// 		errc <- sendMail(ln.Addr().String())
+// 	}()
+// 	conn, err := ln.Accept()
+// 	if err != nil {
+// 		t.Fatalf("failed to accept connection: %v", err)
+// 	}
+// 	defer conn.Close()
+// 	if err := serverHandle(conn, t); err != nil {
+// 		t.Fatalf("failed to handle connection: %v", err)
+// 	}
+// 	if err := <-errc; err != nil {
+// 		t.Fatalf("client error: %v", err)
+// 	}
+// }
 
 func TestTLSConnState(t *testing.T) {
 	ln := newLocalListener(t)

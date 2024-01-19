@@ -2,25 +2,24 @@ package http
 
 import (
 	"fmt"
-	"gonet"
 	"io"
 	"net"
-	"net/url"
-	_url "net/url"
+
+	"github.com/curol/network/url"
 )
 
 // ClientRequest represents a request from the user.
 type ClientConfig struct {
 	Method  string
 	Address string
-	Header  map[string]string
+	Header  map[string][]string
 	Body    io.Reader
 }
 
 type config struct {
 	Method string
 	URL    *url.URL
-	Header gonet.Header
+	Header Header
 	Body   io.Reader
 }
 
@@ -32,7 +31,7 @@ func newConfig(cr *ClientConfig) *config {
 	return &config{
 		Method: cr.Method,
 		URL:    url,
-		Header: gonet.NewHeaderFromMap(cr.Header),
+		Header: newHeaderFromMap(cr.Header),
 		Body:   cr.Body,
 	}
 }
@@ -41,11 +40,11 @@ type Client struct {
 	network  string
 	protocol string
 	*config
-	conn net.Conn        // connection to server
-	reqN int64           // number of bytes written
-	resN int64           // number of bytes read
-	req  *gonet.Request  // request
-	res  *gonet.Response // response
+	conn net.Conn  // connection to server
+	reqN int64     // number of bytes written
+	resN int64     // number of bytes read
+	req  *Request  // request
+	res  *Response // response
 }
 
 func NewClient(config *ClientConfig) *Client {
@@ -72,20 +71,27 @@ func (c *Client) connect() {
 
 // WriteRequest writes the request to the server.
 func (c *Client) writeRequest() {
-	req := gonet.NewRequestFromClient(c.Method, c.URL, c.Header, c.Body)
-	n, err := req.WriteTo(c.conn) // write request
+	addr := c.URL.String() // TODO: fix this
+	// addr := c.URL.Host
+
+	req, err := NewRequest(c.Method, addr, c.Header, io.NopCloser(c.Body))
+	if err != nil {
+		panic(err)
+	}
+
+	err = req.Write(c.conn) // write request
 	if err != nil {
 		if err != io.EOF {
 			panic(err)
 		}
 	}
 	c.req = req
-	c.reqN = n
+	// c.reqN = n
 }
 
 // ReadResponse reads the response from the server.
 func (c *Client) readResponse() {
-	resp, err := gonet.ReadResponse(c.conn) // read response
+	resp, err := ReadResponse(c.conn) // read response
 	if err != nil {
 		if err != io.EOF {
 			panic(err)
@@ -115,8 +121,8 @@ func (c *Client) clean() error {
 //**********************************************************************************************************************
 
 // ParseURL parses a raw url into a URL structure.
-func parseAddress(rawUrl string) (*_url.URL, error) {
-	parsedURL, err := _url.Parse(rawUrl) // parse url
+func parseAddress(rawUrl string) (*url.URL, error) {
+	parsedURL, err := url.Parse(rawUrl) // parse url
 	if err != nil {
 		return nil, fmt.Errorf("Error parsing url %s: %s", rawUrl, err)
 	}

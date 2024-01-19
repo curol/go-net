@@ -72,7 +72,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -85,7 +85,15 @@ import (
 type Response struct {
 	// 1.) Response line is the first line of a response.
 	// Format: <protocol> <statusCode> <statusText>
-	// E.g., "HTTP/1.1 200 OK"
+	//
+	// E.g.,
+	// 	"HTTP/1.0 200 OK"
+	//
+	// 	Status     string // e.g. "200 OK"
+	// 	StatusCode int    // e.g. 200
+	// 	Proto      string // e.g. "HTTP/1.0"
+	// 	ProtoMajor int    // e.g. 1
+	// 	ProtoMinor int    // e.g. 0
 	protocol   string // e.g., "HTTP/1.1"
 	statusCode int    // e.g., 200
 	statusText string // e.g., "OK"
@@ -99,137 +107,34 @@ type Response struct {
 	// For brevity, only using []byte for body.
 	body io.ReadCloser
 
-	// Misc
-	size int // size of response (head+body)
-
 	// Request is the request that was sent to obtain this Response.
 	// Request's Body is nil (having already been consumed).
 	// This is only populated for Client requests.
 	Request *Request
+
+	// Close records whether the header directed that the connection be
+	// closed after reading Body. The value is advice for clients: neither
+	// ReadResponse nor Response.Write ever closes a connection.
+	close bool
 }
 
-func NewResponse(conn net.Conn) *Response {
-	r := &Response{
-		// Connection
-		conn: conn,
-		w:    bufio.NewWriter(conn), // writer for response
-		// 1.) Status
+func newDefaultResponse() *Response {
+	return &Response{
 		protocol:   "HTTP/1.1", // default protocol
 		statusCode: 200,        // default status code
 		statusText: "OK",       // default status text
-		// 2.) Headers
-		header: NewHeader(), // empty header for server to write to
-		// 3.) Body
-		body: nil, // empty buffer for body
+		header:     NewHeader(),
+		body:       nil,
 	}
-	return r
 }
 
-//######################################################################################################################
-// Encode
-//######################################################################################################################
-
-// ToBytes converts the response to a byte slice.
-func (r *Response) ToBytes() []byte {
-	return r.serialize().Bytes()
-}
-
-// ToString converts the response to a string.
-func (r *Response) ToString() string {
-	return string(r.ToBytes())
-}
-
-//######################################################################################################################
-// Serialize
-//######################################################################################################################
-
-// Serialize serializes the response to a byte slice for the raw response output.
-func (r *Response) serialize() *bytes.Buffer {
-	buf := bytes.NewBuffer(nil)
-	// Serialize the head and body of the response
-	r.serializeHead(buf)
-	r.serializeBody(buf)
-	return buf
-}
-
-// SerializeHead serializes the head of a response (response line + headers) to a byte slice.
-//
-// Format:
-//
-// ```
-// Line 1 = Response line
-// Lines 2...N = Header{key: value, ...}
-// Line N+1 = "\r\n
-// ```
-func (r *Response) serializeHead(buf io.Writer) {
-	// delm := "\r\n" // seperator
-	// // Format the status line
-	// statusLine := r.Status() + delm
-	// // Get headers
-	// headersLine := r.header.ToString() + delm
-	// // Add the last delm for (1) seperating the head and body and (2) the start of the body.
-
-	// endOfHeadLine := delm
-	// // Join lines
-	// s := statusLine + headersLine + endOfHeadLine
-	// return []byte(s)
-
-	r.serializeResponseLine(buf) // write response line
-	r.serializeHeader(buf)       // write headers
-	buf.Write([]byte("\r\n"))    // write blank line
-}
-
-func (r *Response) serializeResponseLine(buf io.Writer) (int, error) {
-	s := fmt.Sprintf("%s %s %s\r\n", r.protocol, strconv.Itoa(r.statusCode), r.statusText)
-	return buf.Write([]byte(s))
-}
-
-func (r *Response) serializeHeader(buf io.Writer) (int, error) {
-	header := r.header.ToBytes("\r\n")
-	return buf.Write(header)
-}
-
-func (r *Response) serializeBody(buf io.Writer, size int64) (int64, error) {
-	if r.body == nil {
-		return 0, nil
+// Close closes the connection and writes io.EOF to the connection.
+func (r *Response) Close() error {
+	if r.close {
+		return fmt.Errorf("response already closed")
 	}
-	return io.CopyN(buf, r.body, size)
-}
-
-//######################################################################################################################
-// Writer
-//######################################################################################################################
-
-// WriteOutput writes the response output to Response.w.
-func (r *Response) WriteOutput() (int64, error) {
-	writer := r.w
-	n, err := r.WriteTo(writer)
-	if err != nil && err != io.EOF {
-		return n, err
-	}
-	err = r.Flush() // flush the writer to the client connection
-	if err != nil && err != io.EOF {
-		panic(err)
-	}
-	return n, nil
-}
-
-// Write response output to w.
-func (r *Response) WriteTo(w io.Writer) (int64, error) {
-	// TODO: Transfer in chunks?
-	output := r.serialize().Bytes()
-	n, err := w.Write(output) // write output to w
-	return int64(n), err
-}
-
-// Write writes the data to the writer.
-func (r *Response) Write(b []byte) (int, error) {
-	return r.w.Write(b)
-}
-
-// Flush flushes the writer.
-func (r *Response) Flush() error {
-	return r.w.Flush()
+	r.close = true
+	return nil
 }
 
 // WriteHeader writes the header `k` and `v` to the response.
@@ -237,14 +142,96 @@ func (r *Response) WriteHeader(k string, v string) {
 	r.header.Set(k, v)
 }
 
-// Close closes the connection and writes io.EOF to the connection.
-func (r *Response) Close() error {
-	return r.conn.Close()
+func (r *Response) Write(w io.Writer) (int64, error) {
+	bw := bufio.NewWriter(w)
+	// TODO: Close body?
+	return r.write(bw)
 }
 
-//######################################################################################################################
-// Content
-//######################################################################################################################
+// Write writes response output to w.
+func (r *Response) write(w *bufio.Writer) (int64, error) {
+	// TODO: Transfer in chunks?
+	err := r.serialize(w) // serialize response
+	if err != nil {
+		return 0, err
+	}
+	// n, err := w.Write(buf.Bytes()) // write output to w
+	return int64(w.Size()), err
+}
+
+// Serialize serializes the response to w.
+func (r *Response) serialize(w *bufio.Writer) error {
+	// 1. Response line
+	rl := fmt.Sprintf("%s %s %s\r\n", r.protocol, strconv.Itoa(r.statusCode), r.statusText)
+	_, err := w.Write([]byte(rl))
+	if err != nil {
+		return err
+	}
+
+	// 2. Header
+	r.header.Write(w)
+	if err != nil {
+		return err
+	}
+
+	// 3. End of head
+	w.Write([]byte("\r\n")) // 3. end of head
+
+	// 4. Flush head
+	w.Flush()
+
+	// 5. Body
+	if r.body != nil {
+		contLen := int64(r.contentLength)
+		_, err = io.CopyN(w, r.body, contLen) // copy body to writer
+		if err != nil {
+			return err
+		}
+		err = w.Flush() // flush the writer to the client connection
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// ToBuffer encodes the request into a *bytes.Buffer.
+func (r *Response) ToBuffer() (*bytes.Buffer, error) {
+	buf := bytes.NewBuffer(nil)
+	_, err := r.Write(buf)
+	return buf, err
+}
+
+// Equals returns true if the other Request is equal to this Request.
+// func (p *Response) Equals(other *Response) error {
+// 	if p.protocol != other.protocol {
+// 		return fmt.Errorf("protocol mismatch (%s != %s)", p.protocol, other.protocol)
+// 	}
+// 	if p.statusCode != other.statusCode {
+// 		return fmt.Errorf("status code mismatch (%d != %d)", p.statusCode, other.statusCode)
+// 	}
+// 	if p.statusText != other.statusText {
+// 		return fmt.Errorf("status text mismatch (%s != %s)", p.statusText, other.statusText)
+// 	}
+// 	if p.contentLength != other.contentLength {
+// 		return fmt.Errorf("content length mismatch (%d != %d)", p.contentLength, other.contentLength)
+// 	}
+// 	if p.contentType != other.contentType {
+// 		return fmt.Errorf("content type mismatch (%d != %d)", p.contentLength, other.contentLength)
+// 	}
+// 	if !p.close && !other.close {
+// 		return fmt.Errorf("close mismatch (%v != %v)", p.close, other.close)
+// 	}
+// 	if p.Request.Equals(other.Request) != nil {
+// 		return fmt.Errorf("request mismatch (%v != %v)", p.Request, other.Request)
+// 	}
+// 	return nil
+// }
+
+//********************************************************************************************************************//
+// Output
+//********************************************************************************************************************//
 
 // Text writes the string `s` to the response body and sets the content to `text/plain`.
 func (r *Response) Text(s string) {
@@ -252,7 +239,8 @@ func (r *Response) Text(s string) {
 	cl := strconv.Itoa(len(s))
 	r.header.Set("Content-Type", ct)
 	r.header.Set("Content-Length", cl)
-	r.body = []byte(s)
+
+	r.body = io.NopCloser(bytes.NewBufferString(s))
 }
 
 // JSON writes the JSON `v` to the response body and sets the content to `application/json`.
@@ -263,8 +251,56 @@ func (r *Response) JSON(v any) error {
 	}
 	r.header.Set("Content-Type", "application/json")
 	r.header.Set("Content-Length", strconv.Itoa(len(result)))
-	r.body = result
+
+	r.body = io.NopCloser(bytes.NewBuffer(result))
+
 	return nil
+}
+
+func (r *Response) HTML(s string) {
+	ct := "text/html"
+	cl := strconv.Itoa(len(s))
+	r.header.Set("Content-Type", ct)
+	r.header.Set("Content-Length", cl)
+
+	r.body = io.NopCloser(bytes.NewBufferString(s))
+}
+
+func (r *Response) XML(s string) {
+	ct := "text/xml"
+	cl := strconv.Itoa(len(s))
+	r.header.Set("Content-Type", ct)
+	r.header.Set("Content-Length", cl)
+
+	r.body = io.NopCloser(bytes.NewBufferString(s))
+}
+
+func (r *Response) JSONP(s string) {
+	ct := "application/javascript"
+	cl := strconv.Itoa(len(s))
+	r.header.Set("Content-Type", ct)
+	r.header.Set("Content-Length", cl)
+
+	r.body = io.NopCloser(bytes.NewBufferString(s))
+}
+
+func (r *Response) File(s string) {
+	ct := "application/octet-stream"
+	f, err := os.Open(s)
+	if err != nil {
+		panic(err)
+	}
+	stat, err := f.Stat()
+	if err != nil {
+		panic(err)
+	}
+	cl := strconv.FormatInt(stat.Size(), 10) // Convert cl to a string
+	r.header.Set("Content-Type", ct)
+	r.header.Set("Content-Length", cl)
+
+	// TODO: Use io.NopCloser()?
+	// r.body = io.NopCloser(f)
+	r.body = f
 }
 
 //######################################################################################################################
@@ -308,24 +344,6 @@ func (r *Response) InternalServerError() {
 }
 
 //********************************************************************************************************************
-// Output
-//********************************************************************************************************************
-
-// Head returns the output for response's head.
-func (r *Response) Head() []byte {
-	buf := bytes.NewBuffer(nil)
-	r.serializeHead(buf)
-	return buf.Bytes()
-}
-
-// ResponseLineOutput returns the output for the respnonse line.
-func (r *Response) ResponseLine() []byte {
-	buf := bytes.NewBuffer(nil)
-	r.serializeResponseLine(buf)
-	return buf.Bytes()
-}
-
-//********************************************************************************************************************
 // Getters
 //********************************************************************************************************************
 
@@ -341,37 +359,7 @@ func (r *Response) StatusText() string { return r.statusText }
 func (r *Response) Header() Header { return r.header }
 
 // Body returns the response body.
-func (r *Response) Body() []byte { return r.body }
-
-// Size returns the size of the response.
-func (r *Response) Size() int { return r.size }
-
-//######################################################################################################################
-// Logic
-//######################################################################################################################
-
-// Equals returns true if the other Request is equal to this Request.
-func (p *Response) Equals(other *Response) error {
-	if p.protocol != other.protocol {
-		return fmt.Errorf("protocol mismatch (%s != %s)", p.protocol, other.protocol)
-	}
-	if p.statusCode != other.statusCode {
-		return fmt.Errorf("status code mismatch (%d != %d)", p.statusCode, other.statusCode)
-	}
-	if p.statusText != other.statusText {
-		return fmt.Errorf("status text mismatch (%s != %s)", p.statusText, other.statusText)
-	}
-	if p.size != other.size {
-		return fmt.Errorf("size mismatch (%d != %d)", p.size, other.size)
-	}
-	if !p.header.Equals(other.header) {
-		return fmt.Errorf("header mismatch (%d != %d)", len(p.header), len(other.header))
-	}
-	if !bytes.Equal(p.body, other.body) {
-		return fmt.Errorf("body mismatch (%s != %s)", p.body, other.body)
-	}
-	return nil
-}
+func (r *Response) Body() io.ReadCloser { return r.body }
 
 //********************************************************************************************************************//
 // Helpers
@@ -385,21 +373,20 @@ func (p *Response) Equals(other *Response) error {
 // pairs included in the response trailer.
 func ReadResponse(r io.Reader) (*Response, error) {
 	// Read the response
-	resp, err := parseResponse(r)
+	resp, err := readResponse(r)
 	if err != nil {
 		return nil, err
 	}
 	return resp, nil
 }
 
-// ParseResponse parses the response from the reader and return a Response.
-func parseResponse(r io.Reader) (*Response, error) {
+// readResponse parses the response from the reader and return a Response.
+func readResponse(r io.Reader) (*Response, error) {
 	resp := &Response{}
-
 	reader := bufio.NewReader(r) // reader to read response
+	n := 0                       // number of bytes read
 
-	n := 0 // number of bytes read
-	// 1.) Parse the response line
+	// 1.) Response line
 	statusLine, err := reader.ReadBytes('\n')
 	n = len(statusLine)
 	if err != nil {
@@ -417,7 +404,7 @@ func parseResponse(r io.Reader) (*Response, error) {
 	}
 	resp.statusText = strings.TrimSpace(statusLines[2])
 
-	// 2.) Parse headers
+	// 2.) Headers
 	resp.header = NewHeader()
 	for {
 		line, err := reader.ReadString('\n') // read line
@@ -441,26 +428,61 @@ func parseResponse(r io.Reader) (*Response, error) {
 		resp.header.Set(key, value)
 	}
 
-	// TODO: 3.) Parse the body
-	cl, ok := resp.header.Get("Content-Length")
-	if ok {
-		l, err := strconv.Atoi(cl)
+	// TODO: 3.) Body
+	cl := resp.header.Get("Content-Length")
+	if cl != "" {
+		// if err != nil {
+		// 	return resp, fmt.Errorf("Error parsing 'Content-Length': %s", err)
+		// }
+		// buf := make([]byte, l)
+		// n2, err := reader.Read(buf)
+		// if err != nil {
+		// 	if err != io.EOF {
+		// 		return resp, fmt.Errorf("Error reading response: %s", err)
+		// 	}
+		// 	if n2 != l {
+		// 		return resp, fmt.Errorf("read %d bytes does not match 'Content-Length: %d'", n2, l)
+		// 	}
+		// }
+		// resp.body = buf
+		// resp.size = n + n2
+		resp.contentLength, err = strconv.Atoi(cl)
 		if err != nil {
 			return resp, fmt.Errorf("Error parsing 'Content-Length': %s", err)
 		}
-		buf := make([]byte, l)
-		n2, err := reader.Read(buf)
-		if err != nil {
-			if err != io.EOF {
-				return resp, fmt.Errorf("Error reading response: %s", err)
-			}
-			if n2 != l {
-				return resp, fmt.Errorf("read %d bytes does not match 'Content-Length: %d'", n2, l)
-			}
-		}
-		resp.body = buf
-		resp.size = n + n2
+		resp.body = io.NopCloser(reader)
 	}
-	resp.size = n
 	return resp, nil
+}
+
+type parsedResponseLine struct {
+	Version      string
+	StatusCode   int
+	ReasonPhrase string
+	len          int
+}
+
+func parseResponseLine(r *bufio.Reader) (*parsedResponseLine, error) {
+	// Read
+	line, err := r.ReadString('\n') // read first line
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+
+	parts := strings.Split(line, " ")
+	if len(parts) != 3 {
+		return nil, fmt.Errorf("invalid response line: %s", line)
+	}
+
+	statusCode, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("invalid status code: %s", parts[1])
+	}
+
+	return &parsedResponseLine{
+		Version:      parts[0],
+		StatusCode:   statusCode,
+		ReasonPhrase: parts[2],
+		len:          len(line),
+	}, nil
 }
