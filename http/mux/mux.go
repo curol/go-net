@@ -1,5 +1,5 @@
 package mux
 
-import "github.com/curol/network/http/session"
+import "github.com/curol/network/session"
 
 var GlobalSessions *session.Manager

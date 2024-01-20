@@ -1,5 +1,10 @@
 package token
 
+import (
+	"unicode"
+	"unicode/utf8"
+)
+
 func IsNotToken(r rune) bool {
 	return IsTokenRune(r)
 }
@@ -87,4 +92,9 @@ var IsTokenTable = [127]bool{
 	'z':  true,
 	'|':  true,
 	'~':  true,
+}
+
+func IsExported(name string) bool {
+	ch, _ := utf8.DecodeRuneInString(name)
+	return unicode.IsUpper(ch)
 }

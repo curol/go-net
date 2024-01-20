@@ -31,7 +31,7 @@ func newConfig(cr *ClientConfig) *config {
 	return &config{
 		Method: cr.Method,
 		URL:    url,
-		Header: newHeaderFromMap(cr.Header),
+		Header: Header(cr.Header),
 		Body:   cr.Body,
 	}
 }

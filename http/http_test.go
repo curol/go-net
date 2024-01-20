@@ -16,7 +16,7 @@ import (
 
 func TestNewRequest(t *testing.T) {
 	u, err := url.Parse("http://www.example.com")
-	h := newHeaderFromMap(map[string][]string{
+	h := Header(map[string][]string{
 		"Host":           {"www.example.com"},
 		"Content-Length": {"12"},
 		"Content-Type":   {"text/plain"},
@@ -31,9 +31,8 @@ func TestNewRequest(t *testing.T) {
 		Host:       u.Host,
 		// headers
 		Header:        h,
-		ContentType:   getContentType(h),
 		ContentLength: getContentLength(h),
-		Cookies:       getCookies(h),
+		Cookies:       readCookies(h, ""),
 		// body
 		Body:          nil,
 		Form:          nil,
@@ -68,7 +67,7 @@ func TestReadRequest(t *testing.T) {
 	}
 	raw := []byte(strings.Join(lines, "\r\n"))
 	body := io.NopCloser(strings.NewReader(lines[len(lines)-1]))
-	h := newHeaderFromMap(map[string][]string{
+	h := Header(map[string][]string{
 		"Host":           {"www.example.com"},
 		"Content-Length": {"12"},
 		"Content-Type":   {"text/plain"},
@@ -82,9 +81,9 @@ func TestReadRequest(t *testing.T) {
 		Host:       "www.example.com",
 		// Headers
 		Header:        h,
-		ContentType:   getContentType(h),
-		ContentLength: getContentLength(h),
-		Cookies:       getCookies(h),
+		ContentType:   "text/plain",
+		ContentLength: 12,
+		Cookies:       readCookies(h, ""),
 		// Body
 		Body:          body,
 		Form:          nil,
@@ -155,8 +154,8 @@ func TestReadRequestWithBody(t *testing.T) {
 	}
 	raw := []byte(strings.Join(lines, "\r\n"))
 	body := io.NopCloser(strings.NewReader(lines[len(lines)-1]))
-	h := newHeaderFromMap(map[string][]string{
-		"Host":           {"www.example.com"},
+	h := Header(map[string][]string{
+		// "Host": {"www.example.com"}, // ReadRequest deletes Host header after setting request
 		"Content-Length": {"12"},
 		"Content-Type":   {"text/plain"},
 	})
@@ -171,9 +170,9 @@ func TestReadRequestWithBody(t *testing.T) {
 		Host:       u.Host,
 		// Headers
 		Header:        h,
-		ContentType:   getContentType(h),
-		ContentLength: getContentLength(h),
-		Cookies:       getCookies(h),
+		ContentType:   "text/plain",
+		ContentLength: 12,
+		Cookies:       readCookies(h, ""),
 		// Body
 		Body:          body,
 		Form:          nil,
@@ -209,7 +208,7 @@ func assertRequest(got *Request, want *Request, t *testing.T) {
 		t.Errorf("ReadRequest() = got.protocol %v, want.protocol %v", got.Protocol, want.Protocol)
 	}
 	if !reflect.DeepEqual(got.Header, want.Header) {
-		t.Errorf("ReadRequest() = \ngot.header: %v\n want.header: %v\n", got.Header, want.Header)
+		t.Errorf("ReadRequest()\ngot.header: %v\nwant.header: %v\n", got.Header, want.Header)
 	}
 	if !reflect.DeepEqual(got.URL, want.URL) {
 		t.Errorf("ReadRequest() = got.url %v, want.url %v", got.URL, want.URL)

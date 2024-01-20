@@ -17,8 +17,10 @@ import (
 	"io"
 	"log"
 	"mime/multipart"
+	"strconv"
 	"strings"
 
+	"github.com/curol/network/http/internal/timeformat"
 	url "github.com/curol/network/url"
 )
 
@@ -184,7 +186,7 @@ func newRequest(method string, address string, prot string, header map[string][]
 	if err != nil {
 		panic(err)
 	}
-	h := newHeaderFromMap(header)
+	h := Header(header)
 
 	// TODO: Validate fields
 	if prot != protocol {
@@ -196,7 +198,10 @@ func newRequest(method string, address string, prot string, header map[string][]
 		rc = io.NopCloser(body)
 	}
 
-	// Request
+	// The host's colon:port should be normalized. See Issue 14836.
+	u.Host = removeEmptyPort(u.Host)
+
+	// Set Request
 	req := &Request{
 		// Request line
 		Method:     method,
@@ -205,10 +210,7 @@ func newRequest(method string, address string, prot string, header map[string][]
 		URL:        u,
 		Host:       u.Host, // TODO: Or use host header? Ex. host: getHost(h)
 		// Headers
-		Header:        h,
-		ContentLength: getContentLength(h),
-		ContentType:   getContentType(h),
-		Cookies:       getCookies(h),
+		Header: h,
 		// Body
 		Body:          rc,
 		Form:          nil,
@@ -217,7 +219,7 @@ func newRequest(method string, address string, prot string, header map[string][]
 		RemoteAddress: "",
 	}
 
-	// Body
+	// Set Body
 	if body != nil {
 		switch v := body.(type) {
 		case *bytes.Buffer:
@@ -279,6 +281,8 @@ func newRequest(method string, address string, prot string, header map[string][]
 // If Body is present, Content-Length is <= 0 and TransferEncoding
 // hasn't been set to "identity", Write adds "Transfer-Encoding:
 // chunked" to the header. Body is closed after it is sent.
+//
+// Write is used after the request has been parsed and validated.
 func (r *Request) Write(w io.Writer) error {
 	return r.write(w)
 }
@@ -308,13 +312,36 @@ func (r *Request) write(w io.Writer) error {
 		return err
 	}
 
+	// errMissingHost is returned by Write when there is no Host or URL present in
+	// the Request.
+	var errMissingHost = errors.New("http: Request.Write on Request with no Host or URL set")
+
 	// 3. Serialize and write the headers
 	// TODO: Write Transfer-Encoding, Trailer, and other headers
-	host, _ := getHostForWriter(r)
+
+	// Find the target host. Prefer the Host: header, but if that
+	// is not given, use the host from the request URL.
+	host := r.Host
+	if host == "" {
+		if r.URL == nil {
+			return errMissingHost
+		}
+		host = r.URL.Host
+	}
+	host = timeformat.RemoveZone(host)
 	fmt.Fprintf(w, "Host: %s\r\n", host) // write host
-	userAgent := getUserAgent(r.Header)
-	fmt.Fprintf(w, "User-Agent: %s\r\n", userAgent) // write user agent
-	cl := getContentLength(r.Header)
+
+	// Use the defaultUserAgent unless the Header contains one, which
+	// may be blank to not send the header.
+	userAgent := defaultUserAgent
+	if r.Header.Get("User-Agent") != "" {
+		userAgent = r.Header.Get("User-Agent")
+	}
+	if userAgent != "" {
+		fmt.Fprintf(w, "User-Agent: %s\r\n", userAgent) // write user agent
+	}
+
+	cl := r.ContentLength
 	if cl < 0 && r.Body != nil {
 		fmt.Fprintf(w, "Transfer-Encoding: chunked\r\n") // write transfer encoding
 	} else if cl > 0 {
@@ -389,24 +416,28 @@ func ReadRequest(r *bufio.Reader) (*Request, error) {
 
 // readRequest reads and parses a request from a reader.
 // A request represents an HTTP request received by a server or to be sent by a client.
+// Each line in a raw request is terminated by CRLF ("\r\n").
 //
 // ## Request line
 // - The request line is the first line of a request message with the following format: <method> <path> <protocol>
 // - The request line is followed by a sequence of zero or more header fields, followed by an empty line, indicating the end of the header fields.
-// - Lines are terminated by CRLF ("\r\n").
 // - The method specifies the HTTP method to be performed on the resource identified by the request URI.
 // - The path specifies the path to the resource on the server.
 // - The protocol specifies the protocol version of the request.
 //
-// Note:
+// ### URI vs URL
 // - URI stands for Uniform Resource Identifier, while URL stands for Uniform Resource Locator.
 // - A URI is a string of characters that identifies a name or a resource on the Internet. It is a more general term that encompasses URLs.
 // - A URL is a type of URI that includes the location of the resource on the Internet and the protocol used to access it. It specifies where an identified resource is available and the mechanism for retrieving it. In other words, a URL is a URI that, in addition to identifying a resource, provides a means of locating the resource by describing its primary access mechanism or network "location".
 // - For example, `https://www.example.com/path/to/resource` is a URL. It's also a URI, because every URL is a URI, but not every URI is a URL. A URI like `mailto:example@example.com` is not a URL, because it doesn't specify a location on the Internet and a protocol for retrieving a resource.
+//
+// ### Request-URI
 // - The Request-URI, or Request Uniform Resource Identifier, is a part of the first line (the request line) of an HTTP request message. It identifies the resource upon which to apply the request.
 // - There are four forms of Request-URI: absoluteURI, abs_path, authority, and asterisk.
+// - The path is the RFC 7230 "request-target": it may be either a  path or an absolute URL.
+// - If target is an absolute URL, the host name from the URL is used.  // Otherwise, "example.com" is used.
 //
-// ## Header fields
+// ## Header
 // - The header fields are transmitted after the request line (in case of a request HTTP message) or the response line (in case of a response HTTP message), which is the first line of a message.
 // - Header fields are colon-separated key-value pairs in clear-text string format, terminated by a carriage return (CR) and line feed (LF) character sequence.
 // - The end of the header fields is indicated by an empty field, resulting in the transmission of two consecutive CR-LF pairs.
@@ -424,8 +455,6 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 	if r == nil {
 		return nil, fmt.Errorf("reader nil")
 	}
-	// req := new(Request)
-	// var ok bool
 
 	// 1. Read and parse first Line
 	// TODO: Validate method, path, and protocol and parse HTTP Version
@@ -438,10 +467,7 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 	if err != nil && err != io.EOF {
 		return nil, err
 	}
-	// The path is the RFC 7230 "request-target": it may be either a
-	// path or an absolute URL.
-	// If target is an absolute URL, the host name from the URL is used.
-	// Otherwise, "example.com" is used.
+
 	method, requestURI, prot, ok := parseRequestLine(line) // parse first line
 	if !ok {
 		return nil, fmt.Errorf("invalid request line")
@@ -476,6 +502,22 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 		header.Set(k, v)
 	}
 
+	req := &Request{
+		Method:        method,
+		Protocol:      prot,
+		RequestURI:    requestURI,
+		URL:           u,
+		Host:          u.Host,
+		Header:        header,
+		ContentLength: getContentLength(header),
+		ContentType:   header.Get("Content-Type"),
+		Cookies:       readCookies(header, ""),
+		Body:          io.NopCloser(r),
+		Form:          nil,
+		MultipartForm: nil,
+		RemoteAddress: "",
+	}
+
 	// RFC 7230, section 5.3: Must treat
 	//	GET /index.html HTTP/1.1
 	//	Host: www.google.com
@@ -483,25 +525,8 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 	//	GET http://www.google.com/index.html HTTP/1.1
 	//	Host: doesntmatter
 	// the same. In the second case, any Host line is ignored.
-	host := u.Host
-	if host == "" {
-		host = header.Get("Host")
-	}
-
-	req := &Request{
-		Method:        method,
-		Protocol:      prot,
-		RequestURI:    requestURI,
-		URL:           u,
-		Host:          host,
-		Header:        header,
-		ContentLength: getContentLength(header),
-		ContentType:   getContentType(header),
-		Cookies:       getCookies(header),
-		Body:          io.NopCloser(r),
-		Form:          nil,
-		MultipartForm: nil,
-		RemoteAddress: "",
+	if req.Host == "" {
+		req.Host = req.Header.Get("Host")
 	}
 
 	return req, nil
@@ -537,6 +562,36 @@ func (r *Request) AddCookie(c *Cookie) {
 	} else {
 		r.Header.Set("Cookie", s)
 	}
+}
+
+// ParseHTTPVersion parses an HTTP version string according to RFC 7230, section 2.6.
+// "HTTP/1.0" returns (1, 0, true). Note that strings without
+// a minor version, such as "HTTP/2", are not valid.
+func ParseHTTPVersion(vers string) (major, minor int, ok bool) {
+	switch vers {
+	case "HTTP/1.1":
+		return 1, 1, true
+	case "HTTP/1.0":
+		return 1, 0, true
+	}
+	if !strings.HasPrefix(vers, "HTTP/") {
+		return 0, 0, false
+	}
+	if len(vers) != len("HTTP/X.Y") {
+		return 0, 0, false
+	}
+	if vers[6] != '.' {
+		return 0, 0, false
+	}
+	maj, err := strconv.ParseUint(vers[5:6], 10, 0)
+	if err != nil {
+		return 0, 0, false
+	}
+	min, err := strconv.ParseUint(vers[7:8], 10, 0)
+	if err != nil {
+		return 0, 0, false
+	}
+	return int(maj), int(min), true
 }
 
 // parseRequestLine parses "GET /foo HTTP/1.1" into its three parts.
@@ -575,6 +630,60 @@ func (r *Request) closeBody() error {
 		return nil
 	}
 	return r.Body.Close()
+}
+
+func writeChunks(chunks [][]byte, w io.Writer) {
+	// Write the chunks
+	for _, chunk := range chunks {
+		// Write the chunk size in hexadecimal
+		fmt.Fprintf(w, "%x\r\n", len(chunk))
+
+		// Write the chunk data
+		fmt.Fprint(w, chunk)
+
+		// Write the chunk end
+		fmt.Fprint(w, "\r\n")
+	}
+
+	// Write the last chunk (size 0)
+	fmt.Fprint(w, "0\r\n\r\n")
+}
+
+func readChunks(r *bufio.Reader) (string, error) {
+	var body strings.Builder
+
+	for {
+		// Read the chunk size
+		line, err := r.ReadString('\n')
+		if err != nil {
+			return "", err
+		}
+
+		size, err := strconv.ParseInt(strings.TrimSpace(line), 16, 64)
+		if err != nil {
+			return "", err
+		}
+
+		// End of the message
+		if size == 0 {
+			break
+		}
+
+		// Read the chunk data
+		chunk := make([]byte, size)
+		if _, err := io.ReadFull(r, chunk); err != nil {
+			return "", err
+		}
+
+		body.Write(chunk)
+
+		// Read the chunk end
+		if _, err := r.ReadString('\n'); err != nil {
+			return "", err
+		}
+	}
+
+	return body.String(), nil
 }
 
 // TODO: Implement parseForm

@@ -13,7 +13,3 @@ type Header = net.Header // map[string][]string
 func NewHeader() Header {
 	return Header(net.Header{})
 }
-
-func newHeaderFromMap(m map[string][]string) Header {
-	return Header(net.Header{})
-}

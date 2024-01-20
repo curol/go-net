@@ -1,7 +1,6 @@
 package http
 
 import (
-	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -13,7 +12,8 @@ import (
 const (
 	defaultMaxMemory = 32 << 20 // 32 MB
 	protocol         = "HTTP/1.1"
-	defaultUserAgent = "curol-http-client/1.1"
+	// defaultUserAgent = "curol-http-client/1.1"
+	defaultUserAgent = "Go-http-client/1.1"
 )
 
 // NoBody is an io.ReadCloser with no bytes. Read always returns EOF
@@ -33,130 +33,6 @@ var (
 	_ io.WriterTo   = NoBody
 	_ io.ReadCloser = NoBody
 )
-
-// getHost returns the host as declared in the headers.
-//
-// RFC 7230, section 5.3: Must treat
-//
-//	GET /index.html HTTP/1.1
-//	Host: www.google.com
-//
-// and
-//
-//	GET http://www.google.com/index.html HTTP/1.1
-//	Host: doesntmatter
-//
-// the same.
-// In the second case, any Host line is ignored.
-func getHostForWriter(r *Request) (string, error) {
-	// errMissingHost is returned by Write when there is no Host or URL present in
-	// the Request.
-	var errMissingHost = errors.New("http: Request.Write on Request with no Host or URL set")
-
-	// Find the target host. Prefer the Host: header, but if that
-	// is not given, use the host from the request URL.
-	host := r.Host
-	if host == "" {
-		if r.URL == nil {
-			return "", errMissingHost
-		}
-		host = r.URL.Host
-	}
-	host = removeZone(host)
-
-	// TODO: Validate and clean host
-
-	return host, nil
-}
-
-func getUserAgent(h Header) string {
-	if h.Get("User-Agent") == "" {
-		return defaultUserAgent
-	}
-	return h.Get("User-Agent")
-}
-
-func getContentLength(header Header) int64 {
-	if header == nil {
-		return 0
-	}
-	cl := header.Get("Content-Length")
-	if cl == "" {
-		return 0
-	}
-	v, err := strconv.Atoi(cl)
-	if err != nil {
-		return 0
-	}
-	return int64(v)
-}
-
-func getContentType(header Header) string {
-	ct := header.Get("Content-Type")
-	if ct == "" {
-		return ""
-	}
-	return ct
-}
-
-func getCookies(h Header) []*Cookie {
-	// Original code:
-	// for k, v := range h {
-	// 	if k == "Cookie" {
-	// 		cookie := parseCookie(v)
-	// 		cookies = append(cookies, cookie)
-	// 	}
-	// }
-	// return cookies
-	return readCookies(h, "")
-}
-
-// removeZone removes IPv6 zone identifier from host.
-// E.g., "[fe80::1%en0]:8080" to "[fe80::1]:8080"
-func removeZone(host string) string {
-	if !strings.HasPrefix(host, "[") {
-		return host
-	}
-	i := strings.LastIndex(host, "]")
-	if i < 0 {
-		return host
-	}
-	j := strings.LastIndex(host[:i], "%")
-	if j < 0 {
-		return host
-	}
-	return host[:j] + host[i:]
-}
-
-// ParseHTTPVersion parses an HTTP version string according to RFC 7230, section 2.6.
-// "HTTP/1.0" returns (1, 0, true). Note that strings without
-// a minor version, such as "HTTP/2", are not valid.
-func ParseHTTPVersion(vers string) (major, minor int, ok bool) {
-	switch vers {
-	case "HTTP/1.1":
-		return 1, 1, true
-	case "HTTP/1.0":
-		return 1, 0, true
-	}
-	if !strings.HasPrefix(vers, "HTTP/") {
-		return 0, 0, false
-	}
-	if len(vers) != len("HTTP/X.Y") {
-		return 0, 0, false
-	}
-	if vers[6] != '.' {
-		return 0, 0, false
-	}
-	maj, err := strconv.ParseUint(vers[5:6], 10, 0)
-	if err != nil {
-		return 0, 0, false
-	}
-	min, err := strconv.ParseUint(vers[7:8], 10, 0)
-	if err != nil {
-		return 0, 0, false
-	}
-	return int(maj), int(min), true
-}
 
 func validMethod(method string) bool {
 	/*
@@ -231,4 +107,32 @@ func getSetCookies(h Header) []*Cookie {
 
 func isNotToken(r rune) bool {
 	return !token.IsTokenRune(r)
+}
+
+// removeEmptyPort strips the empty port in ":port" to ""
+// as mandated by RFC 3986 Section 6.2.3.
+func removeEmptyPort(host string) string {
+	if hasPort(host) {
+		return strings.TrimSuffix(host, ":")
+	}
+	return host
+}
+
+// Given a string of the form "host", "host:port", or "[ipv6::address]:port",
+// return true if the string includes a port.
+func hasPort(s string) bool { return strings.LastIndex(s, ":") > strings.LastIndex(s, "]") }
+
+func getContentLength(header Header) int64 {
+	if header == nil {
+		return 0
+	}
+	cl := header.Get("Content-Length")
+	if cl == "" {
+		return 0
+	}
+	v, err := strconv.Atoi(cl)
+	if err != nil {
+		return 0
+	}
+	return int64(v)
 }

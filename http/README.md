@@ -1,5 +1,7 @@
 # http
 
+
+
 ## Write
 
 For output, write serializes the request and writes to a writer.
@@ -96,3 +98,28 @@ headerBytes := buf.Bytes()
 buf.WriteString("\r\n")
 headerBytes := buf.Bytes()
 ```
+
+### Transfer encoding chunked
+
+"Transfer-Encoding: chunked" is a type of HTTP/1.1 message body encoding, also known as chunked transfer encoding. It allows a server to maintain an HTTP connection for dynamically generated content or long-lived connections.
+
+In chunked transfer encoding, the data is divided into a series of chunks. Each chunk is preceded by its size in bytes. The transmission ends when a zero-length chunk is received. This allows the server to start sending data as it is generated without knowing the total size of the data in advance.
+
+Here's a simple example of what chunked transfer encoding might look like:
+
+```
+HTTP/1.1 200 OK 
+Content-Type: text/plain 
+Transfer-Encoding: chunked
+
+7\r\n
+Hello, \r\n
+6\r\n
+world!\r\n
+0\r\n 
+\r\n
+```
+
+In this example, the data "Hello, world!" is sent as two chunks. The first chunk has a size of 7 bytes, and the second chunk has a size of 6 bytes. The end of the message is marked by a chunk with a size of 0 bytes.
+
+Chunked transfer encoding is particularly useful when the server doesn't know the size of the response when it starts transmitting, like when it's generated dynamically or comes from a process that doesn't provide its length in advance.
