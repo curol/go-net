@@ -10,6 +10,12 @@ import (
 	"github.com/curol/network/http/internal/token"
 )
 
+const (
+	defaultMaxMemory = 32 << 20 // 32 MB
+	protocol         = "HTTP/1.1"
+	defaultUserAgent = "curol-http-client/1.1"
+)
+
 // NoBody is an io.ReadCloser with no bytes. Read always returns EOF
 // and Close always returns nil. It can be used in an outgoing client
 // request to explicitly signal that a request has zero bytes.

@@ -157,9 +157,12 @@ type Request struct {
 	// TCP connections between requests to the same hosts, as if
 	// Transport.DisableKeepAlives were set.
 	Close bool
+
+	TransferEncoding []string
 }
 
-// NewRequest for client
+// NewRequest is for client requests.
+// It creates a new request with the given method, address, headers, and body.
 func NewRequest(method string, address string, headers map[string][]string, body io.Reader) (*Request, error) {
 	return newRequest(
 		method,
@@ -307,12 +310,19 @@ func (r *Request) write(w io.Writer) error {
 
 	// 3. Serialize and write the headers
 	// TODO: Write Transfer-Encoding, Trailer, and other headers
-	host, _ := getHostForWriter(r) // get the target host. Prefer the Host: header, but if that is not given, use the host from the request URL.
-	fmt.Fprintf(w, "Host: %s\r\n", host)
+	host, _ := getHostForWriter(r)
+	fmt.Fprintf(w, "Host: %s\r\n", host) // write host
 	userAgent := getUserAgent(r.Header)
-	fmt.Fprintf(w, "User-Agent: %s\r\n", userAgent)
+	fmt.Fprintf(w, "User-Agent: %s\r\n", userAgent) // write user agent
 	cl := getContentLength(r.Header)
-	fmt.Fprintf(w, "Content-Length: %d\r\n", cl)
+	if cl < 0 && r.Body != nil {
+		fmt.Fprintf(w, "Transfer-Encoding: chunked\r\n") // write transfer encoding
+	} else if cl > 0 {
+		fmt.Fprintf(w, "Content-Length: %d\r\n", cl) // write content length
+	} else {
+		// TODO: Handle error
+	}
+
 	var reqWriteExcludeHeader = map[string]bool{
 		"Host":              true,
 		"User-Agent":        true,
@@ -360,11 +370,21 @@ func (p *Request) Reset() {
 	p = new(Request)
 }
 
+// UserAgent returns the client's User-Agent, if sent in the request.
+func (r *Request) UserAgent() string {
+	return r.Header.Get("User-Agent")
+}
+
 // ReadRequest reads and parses a request from a reader.
 //
 // Note: ReadRequest should only be used for servers.
 func ReadRequest(r *bufio.Reader) (*Request, error) {
-	return readRequest(r)
+	req, err := readRequest(r)
+	if err != nil {
+		return nil, err
+	}
+	delete(req.Header, "Host")
+	return req, nil
 }
 
 // readRequest reads and parses a request from a reader.
@@ -485,7 +505,6 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 	}
 
 	return req, nil
-
 }
 
 // ErrNoCookie is returned by Request's Cookie method when a cookie is not found.

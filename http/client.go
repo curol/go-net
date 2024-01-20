@@ -41,10 +41,9 @@ type Client struct {
 	protocol string
 	*config
 	conn net.Conn  // connection to server
-	reqN int64     // number of bytes written
-	resN int64     // number of bytes read
 	req  *Request  // request
 	res  *Response // response
+
 }
 
 func NewClient(config *ClientConfig) *Client {
