@@ -12,12 +12,12 @@ package http
 import (
 	"bufio"
 	"bytes"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"mime/multipart"
-	"strconv"
 	"strings"
 
 	"github.com/curol/network/http/internal/timeformat"
@@ -47,7 +47,11 @@ type Request struct {
 	// For client requests, these fields are ignored. The HTTP
 	// client code always uses either HTTP/1.1 or HTTP/2.
 	// See the docs on Transport for details.
-	Protocol string
+	Proto string
+
+	ProtoMinor int
+
+	ProtoMajor int
 
 	// URL specifies either the URI being requested (for server
 	// requests) or the URL to access (for client requests).
@@ -146,8 +150,6 @@ type Request struct {
 	// The HTTP client ignores MultipartForm and uses Body instead.
 	MultipartForm *multipart.Form
 
-	Cookies []*Cookie // parsed cookies
-
 	// Close indicates whether to close the connection after
 	// replying to this request (for servers) or after sending this
 	// request and reading its response (for clients).
@@ -161,6 +163,24 @@ type Request struct {
 	Close bool
 
 	TransferEncoding []string
+
+	// PostForm contains the parsed form data from PATCH, POST
+	// or PUT body parameters.
+	//
+	// This field is only available after ParseForm is called.
+	// The HTTP client ignores PostForm and uses Body instead.
+	PostForm url.Values
+
+	// TLS is for servers not clients that records the TLS information from a TLS connection
+	TLS *tls.ConnectionState
+
+	// Additional headers sent after the request body.
+	Trailer Header
+
+	// The following fields are for requests matched by ServeMux.
+	pat         *pattern          // the pattern that matched
+	matches     []string          // values for the matching wildcards in pat
+	otherValues map[string]string // for calls to SetPathValue that don't match a wildcard
 }
 
 // NewRequest is for client requests.
@@ -177,11 +197,18 @@ func NewRequest(method string, address string, headers map[string][]string, body
 
 func newRequest(method string, address string, prot string, header map[string][]string, body io.Reader) (*Request, error) {
 	// Arrange
-	method = strings.TrimSpace(strings.ToUpper(method))
 	if method == "" {
 		method = "GET"
 	}
+	method = strings.TrimSpace(strings.ToUpper(method))
 	address = strings.TrimSpace(address)
+	prot = strings.TrimSpace(prot)
+
+	rawurl := address
+	if !strings.Contains(rawurl, "://") { // add scheme if missing
+		rawurl = "http://" + rawurl
+	}
+
 	u, err := url.Parse(address)
 	if err != nil {
 		panic(err)
@@ -205,7 +232,7 @@ func newRequest(method string, address string, prot string, header map[string][]
 	req := &Request{
 		// Request line
 		Method:     method,
-		Protocol:   protocol,
+		Proto:      protocol,
 		RequestURI: u.RequestURI(),
 		URL:        u,
 		Host:       u.Host, // TODO: Or use host header? Ex. host: getHost(h)
@@ -307,7 +334,7 @@ func (r *Request) write(w io.Writer) error {
 	}
 
 	// 2. Serialize and write the request line
-	_, err := fmt.Fprintf(w, "%s %s %s\r\n", r.Method, r.URL.RequestURI(), r.Protocol)
+	_, err := fmt.Fprintf(w, "%s %s %s\r\n", r.Method, r.URL.RequestURI(), r.Proto)
 	if err != nil {
 		return err
 	}
@@ -472,8 +499,10 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 	if !ok {
 		return nil, fmt.Errorf("invalid request line")
 	}
-
 	rawurl := requestURI
+	if !strings.Contains(rawurl, "://") { // add scheme if missing
+		rawurl = "http://" + rawurl
+	}
 	u, err := url.ParseRequestURI(rawurl) // parse uri
 	if err != nil {
 		return nil, err
@@ -504,14 +533,13 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 
 	req := &Request{
 		Method:        method,
-		Protocol:      prot,
+		Proto:         prot,
 		RequestURI:    requestURI,
 		URL:           u,
 		Host:          u.Host,
 		Header:        header,
 		ContentLength: getContentLength(header),
 		ContentType:   header.Get("Content-Type"),
-		Cookies:       readCookies(header, ""),
 		Body:          io.NopCloser(r),
 		Form:          nil,
 		MultipartForm: nil,
@@ -549,6 +577,11 @@ func (r *Request) Cookie(name string) (*Cookie, error) {
 	return nil, ErrNoCookie
 }
 
+// Cookies parses and returns the HTTP cookies sent with the request.
+func (r *Request) Cookies() []*Cookie {
+	return readCookies(r.Header, "")
+}
+
 // AddCookie adds a cookie to the request. Per RFC 6265 section 5.4,
 // AddCookie does not attach more than one [Cookie] header field. That
 // means all cookies, if any, are written into the same line,
@@ -564,58 +597,66 @@ func (r *Request) AddCookie(c *Cookie) {
 	}
 }
 
-// ParseHTTPVersion parses an HTTP version string according to RFC 7230, section 2.6.
-// "HTTP/1.0" returns (1, 0, true). Note that strings without
-// a minor version, such as "HTTP/2", are not valid.
-func ParseHTTPVersion(vers string) (major, minor int, ok bool) {
-	switch vers {
-	case "HTTP/1.1":
-		return 1, 1, true
-	case "HTTP/1.0":
-		return 1, 0, true
+func (r *Request) FormValue(key string) string {
+	if r.Form == nil {
+		// TODO: Implement parseForm
+		r.ParseForm()
 	}
-	if !strings.HasPrefix(vers, "HTTP/") {
-		return 0, 0, false
-	}
-	if len(vers) != len("HTTP/X.Y") {
-		return 0, 0, false
-	}
-	if vers[6] != '.' {
-		return 0, 0, false
-	}
-	maj, err := strconv.ParseUint(vers[5:6], 10, 0)
-	if err != nil {
-		return 0, 0, false
-	}
-	min, err := strconv.ParseUint(vers[7:8], 10, 0)
-	if err != nil {
-		return 0, 0, false
-	}
-	return int(maj), int(min), true
+	return r.Form.Get(key)
 }
 
-// parseRequestLine parses "GET /foo HTTP/1.1" into its three parts.
-func parseRequestLine(line string) (method, requestURI, prot string, ok bool) {
-	// Alternative
-	// method, rest, ok1 := strings.Cut(line, " ")
-	// requestURI, proto, ok2 := strings.Cut(rest, " ")
-	// if !ok1 || !ok2 {
-	// 	return "", "", "", false
-	// }
-	// return method, requestURI, proto, true
-	// Original
-	parts := strings.SplitN(line, " ", 3) // parse first line by splitting into method, path, and protocol
-	if len(parts) != 3 {
-		return "", "", "", false
+// TODO: Implement parseForm
+// ParseForm populates r.Form and r.PostForm.
+//
+// For all requests, ParseForm parses the raw query from the URL and updates
+// r.Form.
+//
+// For POST, PUT, and PATCH requests, it also reads the request body, parses it
+// as a form and puts the results into both r.PostForm and r.Form. Request body
+// parameters take precedence over URL query string values in r.Form.
+//
+// If the request Body's size has not already been limited by MaxBytesReader,
+// the size is capped at 10MB.
+//
+// For other HTTP methods, or when the Content-Type is not
+// application/x-www-form-urlencoded, the request Body is not read, and
+// r.PostForm is initialized to a non-nil, empty value.
+//
+// ParseMultipartForm calls ParseForm automatically.
+// ParseForm is idempotent.
+func (r *Request) ParseForm() error {
+	var err error
+	if r.PostForm == nil {
+		if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
+			r.PostForm, err = parsePostForm(r)
+		}
+		if r.PostForm == nil {
+			r.PostForm = make(url.Values)
+		}
 	}
-	method = strings.ToUpper(strings.TrimSpace(parts[0]))
-	requestURI = strings.TrimSpace(parts[1])
-	prot = strings.TrimSpace(parts[2])
-	return method, requestURI, prot, true
-}
-
-func getRequestLine(method string, address string, protocol string) string {
-	return fmt.Sprintf("%s %s %s\r\n", method, address, protocol)
+	if r.Form == nil {
+		if len(r.PostForm) > 0 {
+			r.Form = make(url.Values)
+			copyValues(r.Form, r.PostForm)
+		}
+		var newValues url.Values
+		if r.URL != nil {
+			var e error
+			newValues, e = url.ParseQuery(r.URL.RawQuery)
+			if err == nil {
+				err = e
+			}
+		}
+		if newValues == nil {
+			newValues = make(url.Values)
+		}
+		if r.Form == nil {
+			r.Form = newValues
+		} else {
+			copyValues(r.Form, newValues)
+		}
+	}
+	return err
 }
 
 func (r *Request) wantsClose() bool {
@@ -631,111 +672,3 @@ func (r *Request) closeBody() error {
 	}
 	return r.Body.Close()
 }
-
-func writeChunks(chunks [][]byte, w io.Writer) {
-	// Write the chunks
-	for _, chunk := range chunks {
-		// Write the chunk size in hexadecimal
-		fmt.Fprintf(w, "%x\r\n", len(chunk))
-
-		// Write the chunk data
-		fmt.Fprint(w, chunk)
-
-		// Write the chunk end
-		fmt.Fprint(w, "\r\n")
-	}
-
-	// Write the last chunk (size 0)
-	fmt.Fprint(w, "0\r\n\r\n")
-}
-
-func readChunks(r *bufio.Reader) (string, error) {
-	var body strings.Builder
-
-	for {
-		// Read the chunk size
-		line, err := r.ReadString('\n')
-		if err != nil {
-			return "", err
-		}
-
-		size, err := strconv.ParseInt(strings.TrimSpace(line), 16, 64)
-		if err != nil {
-			return "", err
-		}
-
-		// End of the message
-		if size == 0 {
-			break
-		}
-
-		// Read the chunk data
-		chunk := make([]byte, size)
-		if _, err := io.ReadFull(r, chunk); err != nil {
-			return "", err
-		}
-
-		body.Write(chunk)
-
-		// Read the chunk end
-		if _, err := r.ReadString('\n'); err != nil {
-			return "", err
-		}
-	}
-
-	return body.String(), nil
-}
-
-// TODO: Implement parseForm
-// // ParseForm populates r.Form and r.PostForm.
-// //
-// // For all requests, ParseForm parses the raw query from the URL and updates
-// // r.Form.
-// //
-// // For POST, PUT, and PATCH requests, it also reads the request body, parses it
-// // as a form and puts the results into both r.PostForm and r.Form. Request body
-// // parameters take precedence over URL query string values in r.Form.
-// //
-// // If the request Body's size has not already been limited by MaxBytesReader,
-// // the size is capped at 10MB.
-// //
-// // For other HTTP methods, or when the Content-Type is not
-// // application/x-www-form-urlencoded, the request Body is not read, and
-// // r.PostForm is initialized to a non-nil, empty value.
-// //
-// // ParseMultipartForm calls ParseForm automatically.
-// // ParseForm is idempotent.
-// func (r *Request) ParseForm() error {
-// 	var err error
-// 	if r.PostForm == nil {
-// 		if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
-// 			r.PostForm, err = parsePostForm(r)
-// 		}
-// 		if r.PostForm == nil {
-// 			r.PostForm = make(url.Values)
-// 		}
-// 	}
-// 	if r.Form == nil {
-// 		if len(r.PostForm) > 0 {
-// 			r.Form = make(url.Values)
-// 			copyValues(r.Form, r.PostForm)
-// 		}
-// 		var newValues url.Values
-// 		if r.URL != nil {
-// 			var e error
-// 			newValues, e = url.ParseQuery(r.URL.RawQuery)
-// 			if err == nil {
-// 				err = e
-// 			}
-// 		}
-// 		if newValues == nil {
-// 			newValues = make(url.Values)
-// 		}
-// 		if r.Form == nil {
-// 			r.Form = newValues
-// 		} else {
-// 			copyValues(r.Form, newValues)
-// 		}
-// 	}
-// 	return err
-// }

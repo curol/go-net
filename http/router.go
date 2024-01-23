@@ -1,7 +1,6 @@
 package http
 
 import (
-	"bytes"
 	"fmt"
 )
 
@@ -19,10 +18,10 @@ type HandlerInterface interface {
 // ordinary functions as HTTP handlers. If f is a function
 // with the appropriate signature, HandlerFunc(f) is a
 // Handler that calls f.
-type HandlerFunc func(*Response, *Request)
+type HandlerFunc func(ResponseWriter, *Request)
 
 // ServeConn calls f(w, r).
-func (f HandlerFunc) ServeConn(w *Response, r *Request) {
+func (f HandlerFunc) ServeConn(w ResponseWriter, r *Request) {
 	f(w, r)
 }
 
@@ -58,7 +57,7 @@ func getHandler(r *Router, method string, path string) HandlerFunc {
 }
 
 // Route request to handler
-func (r *Router) Route(req *Request, w *Response) {
+func (r *Router) Route(req *Request, w ResponseWriter) {
 	fmt.Println("Router: Routing request", req)
 
 	// Get handler
@@ -77,9 +76,8 @@ func (r *Router) Route(req *Request, w *Response) {
 // Default Handlers
 // **********************************************************************************************************************
 
-func notFoundHandler(w *Response, r *Request) {
-	s := bytes.NewBuffer([]byte("404 Not Found"))
-	w.Write(s)
+func notFoundHandler(w ResponseWriter, r *Request) {
+	w.Write([]byte("404 Not Found"))
 }
 
 func (r *Router) NotFound(path string, handler HandlerFunc) {

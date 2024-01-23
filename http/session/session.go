@@ -35,11 +35,12 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"net/textproto"
 	"net/url"
 	"os"
 	"time"
+
+	"github.com/curol/network/http"
 )
 
 // Store contains all data for one session process with specific id.

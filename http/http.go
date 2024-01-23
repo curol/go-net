@@ -2,11 +2,6 @@ package http
 
 import (
 	"io"
-	"strconv"
-	"strings"
-
-	"github.com/curol/network/http/internal/ascii"
-	"github.com/curol/network/http/internal/token"
 )
 
 const (
@@ -34,105 +29,83 @@ var (
 	_ io.ReadCloser = NoBody
 )
 
-func validMethod(method string) bool {
-	/*
-	     Method         = "OPTIONS"                ; Section 9.2
-	                    | "GET"                    ; Section 9.3
-	                    | "HEAD"                   ; Section 9.4
-	                    | "POST"                   ; Section 9.5
-	                    | "PUT"                    ; Section 9.6
-	                    | "DELETE"                 ; Section 9.7
-	                    | "TRACE"                  ; Section 9.8
-	                    | "CONNECT"                ; Section 9.9
-	                    | extension-method
-	   extension-method = token
-	     token          = 1*<any CHAR except CTLs or separators>
-	*/
-	return len(method) > 0 && strings.IndexFunc(method, isNotToken) == -1
+// MaxBytesReader is similar to [io.LimitReader] but is intended for
+// limiting the size of incoming request bodies. In contrast to
+// io.LimitReader, MaxBytesReader's result is a ReadCloser, returns a
+// non-nil error of type [*MaxBytesError] for a Read beyond the limit,
+// and closes the underlying reader when its Close method is called.
+//
+// MaxBytesReader prevents clients from accidentally or maliciously
+// sending a large request and wasting server resources. If possible,
+// it tells the [ResponseWriter] to close the connection after the limit
+// has been reached.
+func MaxBytesReader(w ResponseWriter, r io.ReadCloser, n int64) io.ReadCloser {
+	if n < 0 { // Treat negative limits as equivalent to 0.
+		n = 0
+	}
+	return &maxBytesReader{w: w, r: r, i: n, n: n}
 }
 
-// hasToken reports whether token appears with v, ASCII
-// case-insensitive, with space or comma boundaries.
-// token must be all lowercase.
-// v may contain mixed cased.
-func hasToken(v, token string) bool {
-	if len(token) > len(v) || token == "" {
-		return false
-	}
-	if v == token {
-		return true
-	}
-	for sp := 0; sp <= len(v)-len(token); sp++ {
-		// Check that first character is good.
-		// The token is ASCII, so checking only a single byte
-		// is sufficient. We skip this potential starting
-		// position if both the first byte and its potential
-		// ASCII uppercase equivalent (b|0x20) don't match.
-		// False positives ('^' => '~') are caught by EqualFold.
-		if b := v[sp]; b != token[0] && b|0x20 != token[0] {
-			continue
-		}
-		// Check that start pos is on a valid token boundary.
-		if sp > 0 && !isTokenBoundary(v[sp-1]) {
-			continue
-		}
-		// Check that end pos is on a valid token boundary.
-		if endPos := sp + len(token); endPos != len(v) && !isTokenBoundary(v[endPos]) {
-			continue
-		}
-		if ascii.EqualFold(v[sp:sp+len(token)], token) {
-			return true
-		}
-	}
-	return false
+// MaxBytesError is returned by [MaxBytesReader] when its read limit is exceeded.
+type MaxBytesError struct {
+	Limit int64
 }
 
-func isTokenBoundary(b byte) bool {
-	return b == ' ' || b == ',' || b == '\t'
+func (e *MaxBytesError) Error() string {
+	// Due to Hyrum's law, this text cannot be changed.
+	return "http: request body too large"
 }
 
-func getSetCookies(h Header) []*Cookie {
-	// Original code:
-	// cookies := make([]*Cookie, 0)
-	// for k, v := range h {
-	// 	// Response header 'Set-Cookie'
-	// 	if k == "Set-Cookie" {
-	// 		cookie := parseCookie(v)
-	// 		cookies = append(cookies, cookie)
-	// 	}
-	// }
-	// return cookies
-	return readSetCookies(h)
+type maxBytesReader struct {
+	w   ResponseWriter
+	r   io.ReadCloser // underlying reader
+	i   int64         // max bytes initially, for MaxBytesError
+	n   int64         // max bytes remaining
+	err error         // sticky error
 }
 
-func isNotToken(r rune) bool {
-	return !token.IsTokenRune(r)
+func (l *maxBytesReader) Read(p []byte) (n int, err error) {
+	if l.err != nil {
+		return 0, l.err
+	}
+	if len(p) == 0 {
+		return 0, nil
+	}
+	// If they asked for a 32KB byte read but only 5 bytes are
+	// remaining, no need to read 32KB. 6 bytes will answer the
+	// question of the whether we hit the limit or go past it.
+	// 0 < len(p) < 2^63
+	if int64(len(p))-1 > l.n {
+		p = p[:l.n+1]
+	}
+	n, err = l.r.Read(p)
+
+	if int64(n) <= l.n {
+		l.n -= int64(n)
+		l.err = err
+		return n, err
+	}
+
+	n = int(l.n)
+	l.n = 0
+
+	// The server code and client code both use
+	// maxBytesReader. This "requestTooLarge" check is
+	// only used by the server code. To prevent binaries
+	// which only using the HTTP Client code (such as
+	// cmd/go) from also linking in the HTTP server, don't
+	// use a static type assertion to the server
+	// "*response" type. Check this interface instead:
+	type requestTooLarger interface {
+		requestTooLarge()
+	}
+	if res, ok := l.w.(requestTooLarger); ok {
+		res.requestTooLarge()
+	}
+	l.err = &MaxBytesError{l.i}
+	return n, l.err
 }
 
-// removeEmptyPort strips the empty port in ":port" to ""
-// as mandated by RFC 3986 Section 6.2.3.
-func removeEmptyPort(host string) string {
-	if hasPort(host) {
-		return strings.TrimSuffix(host, ":")
-	}
-	return host
-}
-
-// Given a string of the form "host", "host:port", or "[ipv6::address]:port",
-// return true if the string includes a port.
-func hasPort(s string) bool { return strings.LastIndex(s, ":") > strings.LastIndex(s, "]") }
-
-func getContentLength(header Header) int64 {
-	if header == nil {
-		return 0
-	}
-	cl := header.Get("Content-Length")
-	if cl == "" {
-		return 0
-	}
-	v, err := strconv.Atoi(cl)
-	if err != nil {
-		return 0
-	}
-	return int64(v)
+func (l *maxBytesReader) Close() error {
+	return l.r.Close()
 }

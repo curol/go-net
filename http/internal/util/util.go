@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/mitchellh/mapstructure"
 )
 
 func NewBuffer(b []byte) *bytes.Buffer {
@@ -68,4 +70,22 @@ func IsReadersEqual(r1, r2 io.Reader) (bool, error) {
 			return err1 == err2, nil
 		}
 	}
+}
+
+func MergeStructs(s1, s2, result interface{}) {
+	var m1 map[string]interface{}
+	var m2 map[string]interface{}
+
+	mapstructure.Decode(s1, &m1)
+	mapstructure.Decode(s2, &m2)
+
+	// Merge the maps
+	for k, v := range m2 {
+		m1[k] = v
+	}
+
+	// Convert the map back to a struct
+	mapstructure.Decode(m1, &result)
+
+	fmt.Println(result)
 }

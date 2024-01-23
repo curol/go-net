@@ -1,6 +1,6 @@
 package session
 
-import "net/http"
+import "github.com/curol/network/http"
 
 // ManagerConfig define the session config
 type ManagerConfig struct {

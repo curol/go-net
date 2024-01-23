@@ -72,10 +72,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strconv"
 	"strings"
 )
+
+var respExcludeHeader = map[string]bool{
+	"Content-Length":    true,
+	"Transfer-Encoding": true,
+	"Trailer":           true,
+}
 
 // Response represents a bare bones HTTP response.
 //
@@ -83,150 +90,157 @@ import (
 // (1) Response line, (2) Headers, and (3) Body.
 // Also, you can seperate it into two parts: (1) head and (2) body.
 type Response struct {
-	// 1.) Response line is the first line of a response.
-	// Format: <protocol> <statusCode> <statusText>
-	//
+	// Response-Line format: <protocol> <statusCode> <statusText>
 	// E.g.,
 	// 	"HTTP/1.0 200 OK"
-	//
-	// 	Status     string // e.g. "200 OK"
-	// 	StatusCode int    // e.g. 200
-	// 	Proto      string // e.g. "HTTP/1.0"
-	// 	ProtoMajor int    // e.g. 1
-	// 	ProtoMinor int    // e.g. 0
-	protocol   string // e.g., "HTTP/1.1"
-	statusCode int    // e.g., 200
-	statusText string // e.g., "OK"
+	Proto      string // e.g. "HTTP/1.0"
+	ProtoMajor int    // e.g. 1
+	ProtoMinor int    // e.g. 0
+	Status     string // e.g. "200 OK"
+	StatusCode int    // e.g., 200
+	StatusText string // e.g., "OK"
 
 	// 2.) Headers come after the response line and each header is a new line of format "<key>: <value>".
 	header        Header
-	contentLength int
-	contentType   string
+	ContentLength int
+	ContentType   string
 
 	// 3.) Body is the payload or contents of the response.
 	// For brevity, only using []byte for body.
-	body io.ReadCloser
+	Body io.ReadCloser
 
 	// Request is the request that was sent to obtain this Response.
 	// Request's Body is nil (having already been consumed).
 	// This is only populated for Client requests.
 	Request *Request
 
-	// Close records whether the header directed that the connection be
+	// IsClose records whether the header directed that the connection be
 	// closed after reading Body. The value is advice for clients: neither
 	// ReadResponse nor Response.Write ever closes a connection.
-	close bool
+	IsClose bool
+
+	conn net.Conn
+
+	wroteHeader bool
+
+	code int
 }
 
-func newDefaultResponse() *Response {
+func NewResponse(conn net.Conn) *Response {
 	return &Response{
-		protocol:   "HTTP/1.1", // default protocol
-		statusCode: 200,        // default status code
-		statusText: "OK",       // default status text
-		header:     NewHeader(),
-		body:       nil,
+		Proto:         protocol, // default protocol
+		StatusCode:    200,      // default status code
+		StatusText:    "OK",     // default status text
+		header:        NewHeader(),
+		Body:          nil,
+		ContentLength: 0,
+		conn:          conn,
 	}
+}
+
+func (r *Response) Header() Header {
+	return r.header
 }
 
 // Close closes the connection and writes io.EOF to the connection.
 func (r *Response) Close() error {
-	if r.close {
+	if r.IsClose {
 		return fmt.Errorf("response already closed")
 	}
-	r.close = true
+	r.IsClose = true
 	return nil
 }
 
 // WriteHeader writes the header `k` and `v` to the response.
-func (r *Response) WriteHeader(k string, v string) {
-	r.header.Set(k, v)
+func (r *Response) WriteHeader(statusCode int) {
+	req := r.Request
+	if req == nil {
+		fmt.Println("WriteHeader(): Request is nil")
+		return
+	}
+	if req.URL == nil {
+		fmt.Println("WriteHeader(): Request.URL is nil")
+		return
+	}
+	if r.wroteHeader {
+		// Note: explicitly using Stderr, as Stdout is our HTTP output.
+		fmt.Fprintf(os.Stderr, "WriteHeader attempted to write header twice on request for %s", req.URL)
+		return
+	}
+	r.wroteHeader = true
+	r.code = statusCode
 }
 
-func (r *Response) Write(w io.Writer) (int64, error) {
-	bw := bufio.NewWriter(w)
-	// TODO: Close body?
-	return r.write(bw)
+// Write writes r to w.
+func (r *Response) Write(b []byte) (int, error) {
+	return r.conn.Write(b)
 }
 
-// Write writes response output to w.
+func (r *Response) WriteTo(w io.Writer) (int64, error) {
+	// Type switch writer
+	switch v := w.(type) {
+	case *bufio.Writer:
+		return r.write(v)
+	case *bytes.Buffer:
+		bw := bufio.NewWriter(v)
+		return r.write(bw)
+	default:
+		// TOOD: Add other types
+	}
+	return 0, fmt.Errorf("invalid type")
+}
+
+// write serializes the response to the writer.
 func (r *Response) write(w *bufio.Writer) (int64, error) {
-	// TODO: Transfer in chunks?
-	err := r.serialize(w) // serialize response
+	// 1. Response line
+	rl := fmt.Sprintf("%s %s %s\r\n", r.Proto, strconv.Itoa(r.StatusCode), r.StatusText)
+	_, err := w.Write([]byte(rl))
 	if err != nil {
 		return 0, err
 	}
-	// n, err := w.Write(buf.Bytes()) // write output to w
-	return int64(w.Size()), err
-}
-
-// Serialize serializes the response to w.
-func (r *Response) serialize(w *bufio.Writer) error {
-	// 1. Response line
-	rl := fmt.Sprintf("%s %s %s\r\n", r.protocol, strconv.Itoa(r.statusCode), r.statusText)
-	_, err := w.Write([]byte(rl))
+	err = w.Flush() // flush request line
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// 2. Header
-	r.header.Write(w)
+	err = r.header.Write(w)
 	if err != nil {
-		return err
+		return 0, err
+	}
+	err = w.Flush() // flush header
+	if err != nil {
+		return 0, err
 	}
 
 	// 3. End of head
-	w.Write([]byte("\r\n")) // 3. end of head
-
-	// 4. Flush head
-	w.Flush()
+	fmt.Fprintf(w, "\r\n") // automatically flushes
 
 	// 5. Body
-	if r.body != nil {
-		contLen := int64(r.contentLength)
-		_, err = io.CopyN(w, r.body, contLen) // copy body to writer
+	if r.Body != nil {
+		contLen := int64(r.ContentLength)
+		_, err = io.CopyN(w, r.Body, contLen) // copy Body to writer
 		if err != nil {
-			return err
+			return 0, err
 		}
-		err = w.Flush() // flush the writer to the client connection
-		if err != nil {
-			return err
-		}
+		// TODO: Flush?
+		// err = w.Flush() // flush the writer to the client connection
+		// if err != nil {
+		// 	return 0, err
+		// }
 	}
 
-	return nil
+	if err != nil {
+		return 0, err
+	}
+	return int64(w.Size()), err
 }
 
-// ToBuffer encodes the request into a *bytes.Buffer.
-func (r *Response) ToBuffer() (*bytes.Buffer, error) {
-	buf := bytes.NewBuffer(nil)
-	_, err := r.Write(buf)
-	return buf, err
-}
-
-// Equals returns true if the other Request is equal to this Request.
-// func (p *Response) Equals(other *Response) error {
-// 	if p.protocol != other.protocol {
-// 		return fmt.Errorf("protocol mismatch (%s != %s)", p.protocol, other.protocol)
-// 	}
-// 	if p.statusCode != other.statusCode {
-// 		return fmt.Errorf("status code mismatch (%d != %d)", p.statusCode, other.statusCode)
-// 	}
-// 	if p.statusText != other.statusText {
-// 		return fmt.Errorf("status text mismatch (%s != %s)", p.statusText, other.statusText)
-// 	}
-// 	if p.contentLength != other.contentLength {
-// 		return fmt.Errorf("content length mismatch (%d != %d)", p.contentLength, other.contentLength)
-// 	}
-// 	if p.contentType != other.contentType {
-// 		return fmt.Errorf("content type mismatch (%d != %d)", p.contentLength, other.contentLength)
-// 	}
-// 	if !p.close && !other.close {
-// 		return fmt.Errorf("close mismatch (%v != %v)", p.close, other.close)
-// 	}
-// 	if p.Request.Equals(other.Request) != nil {
-// 		return fmt.Errorf("request mismatch (%v != %v)", p.Request, other.Request)
-// 	}
-// 	return nil
+// // ToBuffer encodes the request into a *bytes.Buffer.
+// func (r *Response) ToBuffer() (*bytes.Buffer, error) {
+// 	buf := bytes.NewBuffer(nil)
+// 	_, err := r.Write(buf)
+// 	return buf, err
 // }
 
 //********************************************************************************************************************//
@@ -240,7 +254,7 @@ func (r *Response) Text(s string) {
 	r.header.Set("Content-Type", ct)
 	r.header.Set("Content-Length", cl)
 
-	r.body = io.NopCloser(bytes.NewBufferString(s))
+	r.Body = io.NopCloser(bytes.NewBufferString(s))
 }
 
 // JSON writes the JSON `v` to the response body and sets the content to `application/json`.
@@ -252,7 +266,7 @@ func (r *Response) JSON(v any) error {
 	r.header.Set("Content-Type", "application/json")
 	r.header.Set("Content-Length", strconv.Itoa(len(result)))
 
-	r.body = io.NopCloser(bytes.NewBuffer(result))
+	r.Body = io.NopCloser(bytes.NewBuffer(result))
 
 	return nil
 }
@@ -263,7 +277,7 @@ func (r *Response) HTML(s string) {
 	r.header.Set("Content-Type", ct)
 	r.header.Set("Content-Length", cl)
 
-	r.body = io.NopCloser(bytes.NewBufferString(s))
+	r.Body = io.NopCloser(bytes.NewBufferString(s))
 }
 
 func (r *Response) XML(s string) {
@@ -272,7 +286,7 @@ func (r *Response) XML(s string) {
 	r.header.Set("Content-Type", ct)
 	r.header.Set("Content-Length", cl)
 
-	r.body = io.NopCloser(bytes.NewBufferString(s))
+	r.Body = io.NopCloser(bytes.NewBufferString(s))
 }
 
 func (r *Response) JSONP(s string) {
@@ -281,7 +295,7 @@ func (r *Response) JSONP(s string) {
 	r.header.Set("Content-Type", ct)
 	r.header.Set("Content-Length", cl)
 
-	r.body = io.NopCloser(bytes.NewBufferString(s))
+	r.Body = io.NopCloser(bytes.NewBufferString(s))
 }
 
 func (r *Response) File(s string) {
@@ -300,7 +314,7 @@ func (r *Response) File(s string) {
 
 	// TODO: Use io.NopCloser()?
 	// r.body = io.NopCloser(f)
-	r.body = f
+	r.Body = f
 }
 
 //######################################################################################################################
@@ -309,57 +323,43 @@ func (r *Response) File(s string) {
 
 // Ok indicates that the request is successful.
 func (r *Response) Ok() {
-	r.statusCode = 200
-	r.statusText = "OK"
+	r.StatusCode = 200
+	r.StatusText = "OK"
 }
 
 // BadRequest indicates that the request could not be understood by the server due to malformed syntax.
 func (r *Response) BadRequest() {
-	r.statusCode = 400
-	r.statusText = "Bad Request"
+	r.StatusCode = 400
+	r.StatusText = "Bad Request"
 }
 
 // NotFound indicates that the server has not found anything matching the Request-URI.
 func (r *Response) NotFound() {
-	r.statusCode = 404
-	r.statusText = "Not Found"
+	r.StatusCode = 404
+	r.StatusText = "Not Found"
 }
 
 // Unauthorized indicates that the request has not been applied because it lacks valid authentication credentials for the target resource.
 func (r *Response) Unauthorized() {
-	r.statusCode = 401
-	r.statusText = "Unauthorized"
+	r.StatusCode = 401
+	r.StatusText = "Unauthorized"
 }
 
 // Forbidden indicates that the server understood the request but refuses to authorize it.
 func (r *Response) Forbidden() {
-	r.statusCode = 403
-	r.statusText = "Forbidden"
+	r.StatusCode = 403
+	r.StatusText = "Forbidden"
 }
 
 // InternalServerError indicates that the server encountered an unexpected condition which prevented it from fulfilling the request.
 func (r *Response) InternalServerError() {
-	r.statusCode = 500
-	r.statusText = "Internal Server Error"
+	r.StatusCode = 500
+	r.StatusText = "Internal Server Error"
 }
 
 //********************************************************************************************************************
 // Getters
 //********************************************************************************************************************
-
-// StatusCode returns the response status code.
-func (r *Response) StatusCode() int { return r.statusCode }
-
-// Protocol returns the response protocol.
-func (r *Response) Protocol() string { return r.protocol }
-
-func (r *Response) StatusText() string { return r.statusText }
-
-// Header returns the response header.
-func (r *Response) Header() Header { return r.header }
-
-// Body returns the response body.
-func (r *Response) Body() io.ReadCloser { return r.body }
 
 //********************************************************************************************************************//
 // Helpers
@@ -397,12 +397,18 @@ func readResponse(r io.Reader) (*Response, error) {
 	if len(statusLines) != 3 {
 		return nil, fmt.Errorf("invalid response status line: %s", status)
 	}
-	resp.protocol = strings.TrimSpace(statusLines[0])
-	resp.statusCode, err = strconv.Atoi(strings.TrimSpace(statusLines[1]))
+	resp.Proto = strings.TrimSpace(statusLines[0])
+	major, minor, ok := ParseHTTPVersion(resp.Proto)
+	if !ok {
+		return nil, fmt.Errorf("invalid response protocol version: %s", resp.Proto)
+	}
+	resp.ProtoMajor = major
+	resp.ProtoMinor = minor
+	resp.StatusCode, err = strconv.Atoi(strings.TrimSpace(statusLines[1]))
 	if err != nil {
 		return nil, err
 	}
-	resp.statusText = strings.TrimSpace(statusLines[2])
+	resp.StatusText = strings.TrimSpace(statusLines[2])
 
 	// 2.) Headers
 	resp.header = NewHeader()
@@ -446,11 +452,11 @@ func readResponse(r io.Reader) (*Response, error) {
 		// }
 		// resp.body = buf
 		// resp.size = n + n2
-		resp.contentLength, err = strconv.Atoi(cl)
+		resp.ContentLength, err = strconv.Atoi(cl)
 		if err != nil {
 			return resp, fmt.Errorf("Error parsing 'Content-Length': %s", err)
 		}
-		resp.body = io.NopCloser(reader)
+		resp.Body = io.NopCloser(reader)
 	}
 	return resp, nil
 }
@@ -485,4 +491,148 @@ func parseResponseLine(r *bufio.Reader) (*parsedResponseLine, error) {
 		ReasonPhrase: parts[2],
 		len:          len(line),
 	}, nil
+}
+
+// A response represents the server side of an HTTP response.
+type response struct {
+	conn             net.Conn
+	req              *Request // request for this response
+	reqBody          io.ReadCloser
+	wroteHeader      bool // a non-1xx header has been (logically) written
+	wroteContinue    bool // 100 Continue response was written
+	wants10KeepAlive bool // HTTP/1.0 w/ Connection "keep-alive"
+	wantsClose       bool // HTTP request has Connection "close"
+}
+
+// The Life Of A Write is like this:
+//
+// Handler starts. No header has been sent. The handler can either
+// write a header, or just start writing. Writing before sending a header
+// sends an implicitly empty 200 OK header.
+//
+// If the handler didn't declare a Content-Length up front, we either
+// go into chunking mode or, if the handler finishes running before
+// the chunking buffer size, we compute a Content-Length and send that
+// in the header instead.
+//
+// Likewise, if the handler didn't set a Content-Type, we sniff that
+// from the initial chunk of output.
+//
+// The Writers are wired together like:
+//
+//  1. *response (the ResponseWriter) ->
+//  2. (*response).w, a [*bufio.Writer] of bufferBeforeChunkingSize bytes ->
+//  3. chunkWriter.Writer (whose writeHeader finalizes Content-Length/Type)
+//     and which writes the chunk headers, if needed ->
+//  4. conn.bufw, a *bufio.Writer of default (4kB) bytes, writing to ->
+//  5. checkConnErrorWriter{c}, which notes any non-nil error on Write
+//     and populates c.werr with it if so, but otherwise writes to ->
+//  6. the rwc, the [net.Conn].
+//
+// TODO(bradfitz): short-circuit some of the buffering when the
+// initial header contains both a Content-Type and Content-Length.
+// Also short-circuit in (1) when the header's been sent and not in
+// chunking mode, writing directly to (4) instead, if (2) has no
+// buffered data. More generally, we could short-circuit from (1) to
+// (3) even in chunking mode if the write size from (1) is over some
+// threshold and nothing is in (2).  The answer might be mostly making
+// bufferBeforeChunkingSize smaller and having bufio's fast-paths deal
+// with this instead.
+func (r *response) Write(data []byte) {
+	// /
+}
+
+// either dataB or dataS is non-zero.
+func (w *response) write(lenData int, dataB []byte, dataS string) (n int, err error) {
+	// if w.conn.hijacked() {
+	// 	if lenData > 0 {
+	// 		caller := relevantCaller()
+	// 		w.conn.server.logf("http: response.Write on hijacked connection from %s (%s:%d)", caller.Function, path.Base(caller.File), caller.Line)
+	// 	}
+	// 	return 0, ErrHijacked
+	// }
+
+	// if w.canWriteContinue.Load() {
+	// 	// Body reader wants to write 100 Continue but hasn't yet.
+	// 	// Tell it not to. The store must be done while holding the lock
+	// 	// because the lock makes sure that there is not an active write
+	// 	// this very moment.
+	// 	w.writeContinueMu.Lock()
+	// 	w.canWriteContinue.Store(false)
+	// 	w.writeContinueMu.Unlock()
+	// }
+
+	// if !w.wroteHeader {
+	// 	w.WriteHeader(StatusOK)
+	// }
+	// if lenData == 0 {
+	// 	return 0, nil
+	// }
+	// if !w.bodyAllowed() {
+	// 	return 0, ErrBodyNotAllowed
+	// }
+
+	// w.written += int64(lenData) // ignoring errors, for errorKludge
+	// if w.contentLength != -1 && w.written > w.contentLength {
+	// 	return 0, ErrContentLength
+	// }
+	// if dataB != nil {
+	// 	return w.w.Write(dataB)
+	// } else {
+	// 	return w.w.WriteString(dataS)
+	// }
+	return 0, nil // TODO: omit this
+}
+
+func (w *response) WriteHeader(code int) {
+	// if w.conn.hijacked() {
+	// 	caller := relevantCaller()
+	// 	w.conn.server.logf("http: response.WriteHeader on hijacked connection from %s (%s:%d)", caller.Function, path.Base(caller.File), caller.Line)
+	// 	return
+	// }
+	// if w.wroteHeader {
+	// 	caller := relevantCaller()
+	// 	w.conn.server.logf("http: superfluous response.WriteHeader call from %s (%s:%d)", caller.Function, path.Base(caller.File), caller.Line)
+	// 	return
+	// }
+	// checkWriteHeaderCode(code)
+
+	// // Handle informational headers.
+	// //
+	// // We shouldn't send any further headers after 101 Switching Protocols,
+	// // so it takes the non-informational path.
+	// if code >= 100 && code <= 199 && code != StatusSwitchingProtocols {
+	// 	// Prevent a potential race with an automatically-sent 100 Continue triggered by Request.Body.Read()
+	// 	if code == 100 && w.canWriteContinue.Load() {
+	// 		w.writeContinueMu.Lock()
+	// 		w.canWriteContinue.Store(false)
+	// 		w.writeContinueMu.Unlock()
+	// 	}
+
+	// 	writeStatusLine(w.conn.bufw, w.req.ProtoAtLeast(1, 1), code, w.statusBuf[:])
+
+	// 	// Per RFC 8297 we must not clear the current header map
+	// 	w.handlerHeader.WriteSubset(w.conn.bufw, excludedHeadersNoBody)
+	// 	w.conn.bufw.Write(crlf)
+	// 	w.conn.bufw.Flush()
+
+	// 	return
+	// }
+
+	// w.wroteHeader = true
+	// w.status = code
+
+	// if w.calledHeader && w.cw.header == nil {
+	// 	w.cw.header = w.handlerHeader.Clone()
+	// }
+
+	// if cl := w.handlerHeader.get("Content-Length"); cl != "" {
+	// 	v, err := strconv.ParseInt(cl, 10, 64)
+	// 	if err == nil && v >= 0 {
+	// 		w.contentLength = v
+	// 	} else {
+	// 		w.conn.server.logf("http: invalid Content-Length of %q", cl)
+	// 		w.handlerHeader.Del("Content-Length")
+	// 	}
+	// }
 }

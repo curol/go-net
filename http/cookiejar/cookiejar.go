@@ -1,9 +1,10 @@
 package cookiejar
 
 import (
-	"net/http"
-	"net/url"
 	"strings"
+
+	"github.com/curol/network/http"
+	"github.com/curol/network/url"
 )
 
 // A CookieJar manages storage and use of cookies in HTTP requests.

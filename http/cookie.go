@@ -266,7 +266,7 @@ func readCookies(h http.Header, filter string) []*Cookie {
 // SetCookie adds a Set-Cookie header to the provided [ResponseWriter]'s headers.
 // The provided cookie must have a valid Name. Invalid cookies may be
 // silently dropped.
-func SetCookie(w *Response, cookie *Cookie) {
+func SetCookie(w ResponseWriter, cookie *Cookie) {
 	if v := cookie.String(); v != "" {
 		// TODO: validate cookie per RFC 6265 rules..
 		// TODO: if multiple Set-Cookie headers are attached, the last one

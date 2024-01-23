@@ -16,23 +16,21 @@ package mock
 
 import (
 	"context"
-	"net/http"
 
+	http "github.com/curol/network/http"
 	"github.com/google/uuid"
-
-	"github.com/curol/network/http/mux"
-	"github.com/curol/network/http/session"
 )
 
-// NewSessionProvider create new SessionProvider
-// and you could use it to mock data
-// Parameter "name" is the real SessionProvider you used
-func NewSessionProvider(name string) *SessionProvider {
-	sp := newSessionProvider()
-	session.Register(name, sp)
-	mux.GlobalSessions, _ = session.NewManager(name, session.NewManagerConfig())
-	return sp
-}
+// // NewSessionProvider create new SessionProvider
+// // and you could use it to mock data
+// // Parameter "name" is the real SessionProvider you used
+// func NewSessionProvider(name string) *SessionProvider {
+// 	sp := newSessionProvider()
+// 	session.Register(name, sp)
+// 	// TODO: set global session provider
+// 	// mux.GlobalSessions, _ = session.NewManager(name, session.NewManagerConfig())
+// 	return sp
+// }
 
 // SessionProvider will replace session provider with "mock" provider
 type SessionProvider struct {
@@ -50,21 +48,21 @@ func (s *SessionProvider) SessionInit(ctx context.Context, gclifetime int64, con
 	return nil
 }
 
-// SessionRead return Store
-func (s *SessionProvider) SessionRead(ctx context.Context, sid string) (session.Store, error) {
-	return s.Store, nil
-}
+// // SessionRead return Store
+// func (s *SessionProvider) SessionRead(ctx context.Context, sid string) (session.Store, error) {
+// 	return s.Store, nil
+// }
 
 // SessionExist always return true
 func (s *SessionProvider) SessionExist(ctx context.Context, sid string) (bool, error) {
 	return true, nil
 }
 
-// SessionRegenerate create new Store
-func (s *SessionProvider) SessionRegenerate(ctx context.Context, oldsid, sid string) (session.Store, error) {
-	s.Store = newSessionStore()
-	return s.Store, nil
-}
+// // SessionRegenerate create new Store
+// func (s *SessionProvider) SessionRegenerate(ctx context.Context, oldsid, sid string) (session.Store, error) {
+// 	s.Store = newSessionStore()
+// 	return s.Store, nil
+// }
 
 // SessionDestroy reset Store to nil
 func (s *SessionProvider) SessionDestroy(ctx context.Context, sid string) error {
