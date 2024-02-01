@@ -1,11 +1,11 @@
-package textproto_test
+package examples
 
 import (
 	"bufio"
 	"fmt"
+	"net/textproto"
 
 	"github.com/curol/network"
-	"github.com/curol/network/textproto"
 )
 
 func ExampleNewReader() {

@@ -178,7 +178,7 @@ type Request struct {
 	Trailer Header
 
 	// The following fields are for requests matched by ServeMux.
-	pat         *pattern          // the pattern that matched
+	// pat         *pattern          // the pattern that matched
 	matches     []string          // values for the matching wildcards in pat
 	otherValues map[string]string // for calls to SetPathValue that don't match a wildcard
 }

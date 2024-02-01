@@ -8,8 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"net/rpc"
 	"sync"
+
+	rpc "github.com/curol/network/rpc"
 )
 
 var errMissingParams = errors.New("jsonrpc: request body missing params")

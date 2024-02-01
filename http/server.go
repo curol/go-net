@@ -2,115 +2,43 @@ package http
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"time"
 
 	"github.com/curol/network/url"
 )
 
-// A ResponseWriter interface is used by an HTTP handler to
-// construct an HTTP response.
+// The Hijacker interface is implemented by ResponseWriters that allow
+// an HTTP handler to take over the connection.
 //
-// A ResponseWriter may not be used after [Handler.ServeHTTP] has returned.
-type ResponseWriter interface {
-	// Header returns the header map that will be sent by
-	// [ResponseWriter.WriteHeader]. The [Header] map also is the mechanism with which
-	// [Handler] implementations can set HTTP trailers.
+// The default [ResponseWriter] for HTTP/1.x connections supports
+// Hijacker, but HTTP/2 connections intentionally do not.
+// ResponseWriter wrappers may also not support Hijacker. Handlers
+// should always test for this ability at runtime.
+type Hijacker interface {
+	// Hijack lets the caller take over the connection.
+	// After a call to Hijack the HTTP server library
+	// will not do anything else with the connection.
 	//
-	// Changing the header map after a call to [ResponseWriter.WriteHeader] (or
-	// [ResponseWriter.Write]) has no effect unless the HTTP status code was of the
-	// 1xx class or the modified headers are trailers.
+	// It becomes the caller's responsibility to manage
+	// and close the connection.
 	//
-	// There are two ways to set Trailers. The preferred way is to
-	// predeclare in the headers which trailers you will later
-	// send by setting the "Trailer" header to the names of the
-	// trailer keys which will come later. In this case, those
-	// keys of the Header map are treated as if they were
-	// trailers. See the example. The second way, for trailer
-	// keys not known to the [Handler] until after the first [ResponseWriter.Write],
-	// is to prefix the [Header] map keys with the [TrailerPrefix]
-	// constant value.
+	// The returned net.Conn may have read or write deadlines
+	// already set, depending on the configuration of the
+	// Server. It is the caller's responsibility to set
+	// or clear those deadlines as needed.
 	//
-	// To suppress automatic response headers (such as "Date"), set
-	// their value to nil.
-	Header() Header
-
-	// Write writes the data to the connection as part of an HTTP reply.
+	// The returned bufio.Reader may contain unprocessed buffered
+	// data from the client.
 	//
-	// If [ResponseWriter.WriteHeader] has not yet been called, Write calls
-	// WriteHeader(http.StatusOK) before writing the data. If the Header
-	// does not contain a Content-Type line, Write adds a Content-Type set
-	// to the result of passing the initial 512 bytes of written data to
-	// [DetectContentType]. Additionally, if the total size of all written
-	// data is under a few KB and there are no Flush calls, the
-	// Content-Length header is added automatically.
-	//
-	// Depending on the HTTP protocol version and the client, calling
-	// Write or WriteHeader may prevent future reads on the
-	// Request.Body. For HTTP/1.x requests, handlers should read any
-	// needed request body data before writing the response. Once the
-	// headers have been flushed (due to either an explicit Flusher.Flush
-	// call or writing enough data to trigger a flush), the request body
-	// may be unavailable. For HTTP/2 requests, the Go HTTP server permits
-	// handlers to continue to read the request body while concurrently
-	// writing the response. However, such behavior may not be supported
-	// by all HTTP/2 clients. Handlers should read before writing if
-	// possible to maximize compatibility.
-	Write([]byte) (int, error)
-
-	// WriteHeader sends an HTTP response header with the provided
-	// status code.
-	//
-	// If WriteHeader is not called explicitly, the first call to Write
-	// will trigger an implicit WriteHeader(http.StatusOK).
-	// Thus explicit calls to WriteHeader are mainly used to
-	// send error codes or 1xx informational responses.
-	//
-	// The provided code must be a valid HTTP 1xx-5xx status code.
-	// Any number of 1xx headers may be written, followed by at most
-	// one 2xx-5xx header. 1xx headers are sent immediately, but 2xx-5xx
-	// headers may be buffered. Use the Flusher interface to send
-	// buffered data. The header map is cleared when 2xx-5xx headers are
-	// sent, but not with 1xx headers.
-	//
-	// The server will automatically send a 100 (Continue) header
-	// on the first read from the request body if the request has
-	// an "Expect: 100-continue" header.
-	WriteHeader(statusCode int)
-}
-
-// A Handler responds to an HTTP request.
-//
-// [Handler.ServeHTTP] should write reply headers and data to the [ResponseWriter]
-// and then return. Returning signals that the request is finished; it
-// is not valid to use the [ResponseWriter] or read from the
-// [Request.Body] after or concurrently with the completion of the
-// ServeHTTP call.
-//
-// Depending on the HTTP client software, HTTP protocol version, and
-// any intermediaries between the client and the Go server, it may not
-// be possible to read from the [Request.Body] after writing to the
-// [ResponseWriter]. Cautious handlers should read the [Request.Body]
-// first, and then reply.
-//
-// Except for reading the body, handlers should not modify the
-// provided Request.
-//
-// If ServeHTTP panics, the server (the caller of ServeHTTP) assumes
-// that the effect of the panic was isolated to the active request.
-// It recovers the panic, logs a stack trace to the server error log,
-// and either closes the network connection or sends an HTTP/2
-// RST_STREAM, depending on the HTTP protocol. To abort a handler so
-// the client sees an interrupted response but the server doesn't log
-// an error, panic with the value [ErrAbortHandler].
-type Handler interface {
-	// ServeConn should write reply headers and data to the [ResponseWriter]
-	// and then return. Returning signals that the request is finished; it
-	// is not valid to use the [ResponseWriter] or read from the
-	// [Request.Body] after or concurrently with the completion of the
-	// ServeHTTP call.
-	ServeConn(ResponseWriter, *Request)
+	// After a call to Hijack, the original Request.Body must not
+	// be used. The original Request's Context remains valid and
+	// is not canceled until the Request's ServeHTTP method
+	// returns.
+	Hijack() (net.Conn, *bufio.ReadWriter, error)
 }
 
 // ListenAndServe listens on the TCP network address addr and then calls
@@ -199,30 +127,75 @@ func (s *Server) serve(conn net.Conn) {
 	s.Logger.Status(conn.RemoteAddr().String(), req.Method, req.RequestURI)
 
 	// Response
-	res := NewResponse(conn)
+	rw := newResponseWriter(conn)
 
-	// Handler
-	s.Handler.ServeConn(res, req)
+	// Serve handler
+	s.Handler.ServeHTTP(rw, req)
 }
-
-// func Run(address string, config *ServerConfig) {
-// 	// Server
-// 	server := NewServer(address, config)
-
-// 	// Listen for connections and serve connection using config.handler
-// 	server.Serve()
-// }
 
 type Server struct {
 	// Connection
 	Network  string
 	Address  string
 	Deadline time.Time
+	// ErrorLog specifies an optional logger for errors accepting
+	// connections, unexpected behavior from handlers, and
+	// underlying FileSystem errors.
+	// If nil, logging is done via the log package's standard logger.
+	ErrorLog *log.Logger
 	// Misc
-	Logger  Log
-	Handler Handler
+	Logger Log
+
+	Handler Handler // handler to invoke, http.DefaultServeMux if nil
 	// Connection
 	listener net.Listener
+
+	// TLSConfig optionally provides a TLS configuration for use
+	// by ServeTLS and ListenAndServeTLS. Note that this value is
+	// cloned by ServeTLS and ListenAndServeTLS, so it's not
+	// possible to modify the configuration with methods like
+	// tls.Config.SetSessionTicketKeys. To use
+	// SetSessionTicketKeys, use Server.Serve with a TLS Listener
+	// instead.
+	TLSConfig *tls.Config
+
+	// ReadTimeout is the maximum duration for reading the entire
+	// request, including the body. A zero or negative value means
+	// there will be no timeout.
+	//
+	// Because ReadTimeout does not let Handlers make per-request
+	// decisions on each request body's acceptable deadline or
+	// upload rate, most users will prefer to use
+	// ReadHeaderTimeout. It is valid to use them both.
+	ReadTimeout time.Duration
+
+	// ReadHeaderTimeout is the amount of time allowed to read
+	// request headers. The connection's read deadline is reset
+	// after reading the headers and the Handler can decide what
+	// is considered too slow for the body. If ReadHeaderTimeout
+	// is zero, the value of ReadTimeout is used. If both are
+	// zero, there is no timeout.
+	ReadHeaderTimeout time.Duration
+
+	// WriteTimeout is the maximum duration before timing out
+	// writes of the response. It is reset whenever a new
+	// request's header is read. Like ReadTimeout, it does not
+	// let Handlers make decisions on a per-request basis.
+	// A zero or negative value means there will be no timeout.
+	WriteTimeout time.Duration
+
+	// IdleTimeout is the maximum amount of time to wait for the
+	// next request when keep-alives are enabled. If IdleTimeout
+	// is zero, the value of ReadTimeout is used. If both are
+	// zero, there is no timeout.
+	IdleTimeout time.Duration
+
+	// MaxHeaderBytes controls the maximum number of bytes the
+	// server will read parsing the request header's keys and
+	// values, including the request line. It does not limit the
+	// size of the request body.
+	// If zero, DefaultMaxHeaderBytes is used.
+	MaxHeaderBytes int
 }
 
 func NewServer(address string, config *ServerConfig) *Server {

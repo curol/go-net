@@ -12,8 +12,9 @@ package rpc
 import (
 	"fmt"
 	"html/template"
-	"net/http"
 	"sort"
+
+	http "github.com/curol/network/http"
 )
 
 const debugText = `<html>

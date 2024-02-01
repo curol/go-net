@@ -1,8 +1,4 @@
-// Copyright 2010 The Go Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
-package jsonrpc
+package examples
 
 import (
 	"encoding/json"
@@ -10,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/rpc"
 	"reflect"
 	"strings"
 	"testing"
+
+	rpc "github.com/curol/network/rpc"
+	jsonrpc "github.com/curol/network/rpc/jsonrpc"
 )
 
 type Args struct {
@@ -79,7 +77,7 @@ func init() {
 func TestServerNoParams(t *testing.T) {
 	cli, srv := net.Pipe()
 	defer cli.Close()
-	go ServeConn(srv)
+	go rpc.ServeConn(srv)
 	dec := json.NewDecoder(cli)
 
 	fmt.Fprintf(cli, `{"method": "Arith.Add", "id": "123"}`)
@@ -95,7 +93,7 @@ func TestServerNoParams(t *testing.T) {
 func TestServerEmptyMessage(t *testing.T) {
 	cli, srv := net.Pipe()
 	defer cli.Close()
-	go ServeConn(srv)
+	go rpc.ServeConn(srv)
 	dec := json.NewDecoder(cli)
 
 	fmt.Fprintf(cli, "{}")
@@ -111,7 +109,7 @@ func TestServerEmptyMessage(t *testing.T) {
 func TestServer(t *testing.T) {
 	cli, srv := net.Pipe()
 	defer cli.Close()
-	go ServeConn(srv)
+	go rpc.ServeConn(srv)
 	dec := json.NewDecoder(cli)
 
 	// Send hand-coded requests to server, parse responses.
@@ -138,9 +136,9 @@ func TestClient(t *testing.T) {
 	// Assume server is okay (TestServer is above).
 	// Test client against server.
 	cli, srv := net.Pipe()
-	go ServeConn(srv)
+	go rpc.ServeConn(srv)
 
-	client := NewClient(cli)
+	client := rpc.NewClient(cli)
 	defer client.Close()
 
 	// Synchronous calls
@@ -201,9 +199,9 @@ func TestClient(t *testing.T) {
 
 func TestBuiltinTypes(t *testing.T) {
 	cli, srv := net.Pipe()
-	go ServeConn(srv)
+	go rpc.ServeConn(srv)
 
-	client := NewClient(cli)
+	client := rpc.NewClient(cli)
 	defer client.Close()
 
 	// Map
@@ -241,7 +239,7 @@ func TestBuiltinTypes(t *testing.T) {
 func TestMalformedInput(t *testing.T) {
 	cli, srv := net.Pipe()
 	go cli.Write([]byte(`{id:1}`)) // invalid json
-	ServeConn(srv)                 // must return, not loop
+	rpc.ServeConn(srv)             // must return, not loop
 }
 
 func TestMalformedOutput(t *testing.T) {
@@ -249,7 +247,7 @@ func TestMalformedOutput(t *testing.T) {
 	go srv.Write([]byte(`{"id":0,"result":null,"error":null}`))
 	go io.ReadAll(srv)
 
-	client := NewClient(cli)
+	client := rpc.NewClient(cli)
 	defer client.Close()
 
 	args := &Args{7, 8}
@@ -262,7 +260,7 @@ func TestMalformedOutput(t *testing.T) {
 
 func TestServerErrorHasNullResult(t *testing.T) {
 	var out strings.Builder
-	sc := NewServerCodec(struct {
+	sc := jsonrpc.NewServerCodec(struct {
 		io.Reader
 		io.Writer
 		io.Closer
@@ -296,7 +294,7 @@ func TestServerErrorHasNullResult(t *testing.T) {
 func TestUnexpectedError(t *testing.T) {
 	cli, srv := myPipe()
 	go cli.PipeWriter.CloseWithError(errors.New("unexpected error!")) // reader will get this error
-	ServeConn(srv)                                                    // must return, not loop
+	rpc.ServeConn(srv)                                                // must return, not loop
 }
 
 // Copied from package net.

@@ -134,10 +134,13 @@ import (
 	"io"
 	"log"
 	"net"
-	"net/http"
+
+	// "net/http"
 	"reflect"
 	"strings"
 	"sync"
+
+	http "github.com/curol/network/http"
 )
 
 const (
@@ -199,7 +202,7 @@ func NewServer() *Server {
 }
 
 // DefaultServer is the default instance of *Server.
-var DefaultServer = NewServer()
+var DefaultServer = NewServer() // global default server
 
 // Is this type exported or a builtin?
 func isExportedOrBuiltinType(t reflect.Type) bool {
@@ -702,7 +705,7 @@ func (server *Server) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	}
 	conn, _, err := w.(http.Hijacker).Hijack()
 	if err != nil {
-		log.Print("rpc hijacking ", req.RemoteAddr, ": ", err.Error())
+		log.Print("rpc hijacking ", req.RemoteAddress, ": ", err.Error())
 		return
 	}
 	io.WriteString(conn, "HTTP/1.0 "+connected+"\n\n")

@@ -4,30 +4,6 @@ import (
 	"fmt"
 )
 
-// HandlerInterface is an interface with the method ServeConn(ResponseWriter, *Request) that handles and responds to an HTTP request.
-type HandlerInterface interface {
-	// ServeHTTP should write reply headers and data to the [ResponseWriter]
-	// and then return. Returning signals that the request is finished; it
-	// is not valid to use the [ResponseWriter] or read from the
-	// [Request.Body] after or concurrently with the completion of the
-	// ServeHTTP call.
-	ServeConn(*Response, *Request)
-}
-
-// The HandlerFunc type is an adapter to allow the use of
-// ordinary functions as HTTP handlers. If f is a function
-// with the appropriate signature, HandlerFunc(f) is a
-// Handler that calls f.
-type HandlerFunc func(ResponseWriter, *Request)
-
-// ServeConn calls f(w, r).
-func (f HandlerFunc) ServeConn(w ResponseWriter, r *Request) {
-	f(w, r)
-}
-
-// Handlers is a map of handlers.
-type Handlers map[string]HandlerFunc
-
 // Router is a barbones router that maps requests to handlers.
 type Router struct {
 	handlers Handlers
@@ -42,6 +18,26 @@ func NewRouter() *Router {
 	addHandler(router, "NotFound", "/", notFoundHandler)
 	return router
 }
+
+// Helper handlers
+
+// Error replies to the request with the specified error message and HTTP code.
+// It does not otherwise end the request; the caller should ensure no further
+// writes are done to w.
+// The error message should be plain text.
+func Error(w ResponseWriter, error string, code int) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(code)
+	fmt.Fprintln(w, error)
+}
+
+// NotFound replies to the request with an HTTP 404 not found error.
+func NotFound(w ResponseWriter, r *Request) { Error(w, "404 page not found", StatusNotFound) }
+
+// NotFoundHandler returns a simple request handler
+// that replies to each request with a “404 page not found” reply.
+func NotFoundHandler() Handler { return HandlerFunc(NotFound) }
 
 // HandleFunc registers the handler function for the given pattern.
 // func HandleFunc(pattern string, handler func(ResponseWriter, *message.Request)) {}

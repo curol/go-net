@@ -392,6 +392,33 @@ func requestFromMap(params map[string]string) (*Request, error) {
 	return r, nil
 }
 
+// StripPrefix returns a handler that serves HTTP requests by removing the
+// given prefix from the request URL's Path (and RawPath if set) and invoking
+// the handler h. StripPrefix handles a request for a path that doesn't begin
+// with prefix by replying with an HTTP 404 not found error. The prefix must
+// match exactly: if the prefix in the request contains escaped characters
+// the reply is also an HTTP 404 not found error.
+func StripPrefix(prefix string, h Handler) Handler {
+	if prefix == "" {
+		return h
+	}
+	return HandlerFunc(func(w ResponseWriter, r *Request) {
+		p := strings.TrimPrefix(r.URL.Path, prefix)
+		rp := strings.TrimPrefix(r.URL.RawPath, prefix)
+		if len(p) < len(r.URL.Path) && (r.URL.RawPath == "" || len(rp) < len(r.URL.RawPath)) {
+			r2 := new(Request)
+			*r2 = *r
+			r2.URL = new(url.URL)
+			*r2.URL = *r.URL
+			r2.URL.Path = p
+			r2.URL.RawPath = rp
+			h.ServeHTTP(w, r2)
+		} else {
+			NotFound(w, r)
+		}
+	})
+}
+
 // cleanPath returns the canonical path for p, eliminating . and .. elements.
 func cleanPath(p string) string {
 	if p == "" {
@@ -412,6 +439,19 @@ func cleanPath(p string) string {
 		}
 	}
 	return np
+}
+
+// stripHostPort returns h without any trailing ":<port>".
+func stripHostPort(h string) string {
+	// If no port on host, return unchanged
+	if !strings.Contains(h, ":") {
+		return h
+	}
+	host, _, err := net.SplitHostPort(h)
+	if err != nil {
+		return h // on error, return unchanged
+	}
+	return host
 }
 
 var errInvalidPath = errors.New("invalid path")

@@ -12,8 +12,9 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"net/rpc"
 	"sync"
+
+	rpc "github.com/curol/network/rpc"
 )
 
 type clientCodec struct {
