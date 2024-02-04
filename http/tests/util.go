@@ -2,26 +2,69 @@ package tests
 
 import (
 	"bytes"
+	"fmt"
 	"go/token"
-	net "net/http"
 	"reflect"
 	"strings"
 	"testing"
 
+	httplib "net/http" // http standard library
+	"net/http/httputil"
+
 	http "github.com/curol/network/http"
 )
 
-// Compare github.com/curol/network.Request to http.Request
-func compareReqToHttpRequest(r1 *http.Request, r2 *net.Request, t *testing.T) {
-	buf := bytes.NewBuffer(nil) // network.Request
-	r1.Write(buf)               // write request
-	myreq := buf.String()       // get request as string
+func mockHttpReq() *httplib.Request {
+	req, err := httplib.NewRequest("GET", "http://example.com", nil)
+	if err != nil {
+		panic(err)
+	}
+	return req
+}
 
-	buf = bytes.NewBuffer(nil) // http.Request
-	r2.Write(buf)
-	libreq := buf.String()
-	if myreq != libreq {
-		t.Errorf("github.com/curol/network/http.Request != http.Request\ngithub.com/curol/network/http.Request:\n%s\n\nhttp.Request:\n%s\n", myreq, libreq)
+func dumpHttpReq(req *httplib.Request) string {
+	dump, err := httputil.DumpRequestOut(req, true)
+	if err != nil {
+		panic(err)
+	}
+	return string(dump)
+}
+
+// Print struct fields and values
+func prettyPrint(v any) {
+	switch v := v.(type) {
+	case *http.Request:
+		//
+		fmt.Println(v.Dump())
+	case *httplib.Request:
+		reqDump, err := httputil.DumpRequestOut(v, true)
+		if err != nil {
+			panic(err)
+		} else {
+			fmt.Printf(string(reqDump))
+		}
+	default:
+		//
+	}
+}
+
+// Compare `github.com/curol/network.Request` to standard library http request `net/http.Request`
+func compareRequests(r1 *http.Request, r2 *httplib.Request, t *testing.T) {
+	// Validate
+	myreq := r1
+	otherreq := r2
+	if myreq == nil || otherreq == nil {
+		t.Errorf("One of the requests is nil")
+	}
+
+	// Write
+	myreqbuf := bytes.NewBuffer(nil)
+	myreq.Write(myreqbuf)
+	otherreqbuf := bytes.NewBuffer(nil)
+	otherreq.Write(otherreqbuf)
+
+	if myreqbuf.String() != otherreqbuf.String() {
+		t.Errorf("Requests are not equal")
 	}
 }
 

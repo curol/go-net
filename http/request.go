@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"mime/multipart"
 	"strings"
 
@@ -47,10 +48,8 @@ type Request struct {
 	// For client requests, these fields are ignored. The HTTP
 	// client code always uses either HTTP/1.1 or HTTP/2.
 	// See the docs on Transport for details.
-	Proto string
-
+	Proto      string
 	ProtoMinor int
-
 	ProtoMajor int
 
 	// URL specifies either the URI being requested (for server
@@ -67,6 +66,28 @@ type Request struct {
 	// request.
 	URL *url.URL
 
+	// Header contains the request header fields either received
+	// by the server or to be sent by the client.
+	//
+	// If a server received a request with header lines,
+	//
+	//	Host: example.com
+	//	accept-encoding: gzip, deflate
+	//	Accept-Language: en-us
+	//	fOO: Bar
+	//	foo: two
+	//
+	// then
+	//
+	//	Header = map[string][]string{
+	//		"Accept-Encoding": {"gzip, deflate"},
+	//		"Accept-Language": {"en-us"},
+	//		"Foo": {"Bar", "two"},
+	//	}
+	//
+	// For incoming requests, the Host header is promoted to the
+	// Request.Host field and removed from the Header map.
+	//
 	// HTTP defines that header names are case-insensitive. The
 	// request parser implements this by using CanonicalHeaderKey,
 	// making the first character and any characters following a
@@ -177,6 +198,7 @@ type Request struct {
 	// Additional headers sent after the request body.
 	Trailer Header
 
+	// TODO: Add misc fields?
 	// The following fields are for requests matched by ServeMux.
 	// pat         *pattern          // the pattern that matched
 	matches     []string          // values for the matching wildcards in pat
@@ -196,46 +218,57 @@ func NewRequest(method string, address string, headers map[string][]string, body
 }
 
 func newRequest(method string, address string, prot string, header map[string][]string, body io.Reader) (*Request, error) {
-	// Arrange
 	if method == "" {
 		method = "GET"
 	}
+	// 1. Parse request Line
 	method = strings.TrimSpace(strings.ToUpper(method))
 	address = strings.TrimSpace(address)
 	prot = strings.TrimSpace(prot)
+	major, minor, ok := ParseHTTPVersion(prot) // parse protocol
+	if !ok {
+		return nil, fmt.Errorf("invalid protocol")
+	}
 
+	// 2. Parse URL
 	rawurl := address
 	if !strings.Contains(rawurl, "://") { // add scheme if missing
 		rawurl = "http://" + rawurl
 	}
-
-	u, err := url.Parse(address)
-	if err != nil {
+	u, err := parseURL(rawurl) // parse url
+	if err != nil {            // TODO: Handle error
 		panic(err)
 	}
-	h := Header(header)
+	u.Host = removeEmptyPort(u.Host) // the host's colon:port should be normalized. See Issue 14836.
 
-	// TODO: Validate fields
-	if prot != protocol {
-		return nil, fmt.Errorf("invalid protocol")
+	// 3. Set Headers
+	// TODO: Which headers should be set by default for client request?
+	if header == nil {
+		header = make(map[string][]string)
 	}
+	h := Header(header)
+	h.Set("User-Agent", defaultUserAgent)
+	h.Set("Host", u.Host)
 
+	// 4. Set Body
 	rc, ok := body.(io.ReadCloser)
 	if !ok && body != nil {
 		rc = io.NopCloser(body)
 	}
 
-	// The host's colon:port should be normalized. See Issue 14836.
-	u.Host = removeEmptyPort(u.Host)
+	// 5. Validate
+	// TODO: Validate fields
 
-	// Set Request
+	// 6. Set new Request
 	req := &Request{
 		// Request line
 		Method:     method,
 		Proto:      protocol,
-		RequestURI: u.RequestURI(),
-		URL:        u,
-		Host:       u.Host, // TODO: Or use host header? Ex. host: getHost(h)
+		ProtoMajor: major,
+		ProtoMinor: minor,
+		// RequestURI: "", // Don't set RequestURI for client requests
+		URL:  u,
+		Host: u.Host, // TODO: Or use host header? Ex. host: getHost(h)
 		// Headers
 		Header: h,
 		// Body
@@ -356,6 +389,27 @@ func (r *Request) write(w io.Writer) error {
 		host = r.URL.Host
 	}
 	host = timeformat.RemoveZone(host)
+	// Validate host
+	// Validate that the Host header is a valid header in general,
+	// but don't validate the host itself. This is sufficient to avoid
+	// header or request smuggling via the Host field.
+	// The server can (and will, if it's a net/http server) reject
+	// the request if it doesn't consider the host valid.
+	if !ValidHostHeader(host) {
+		// Historically, we would truncate the Host header after '/' or ' '.
+		// Some users have relied on this truncation to convert a network
+		// address such as Unix domain socket path into a valid, ignored
+		// Host header (see https://go.dev/issue/61431).
+		//
+		// We don't preserve the truncation, because sending an altered
+		// header field opens a smuggling vector. Instead, zero out the
+		// Host header entirely if it isn't valid. (An empty Host is valid;
+		// see RFC 9112 Section 3.2.)
+		//
+		// Return an error if we're sending to a proxy, since the proxy
+		// probably can't do anything useful with an empty Host header.
+		host = ""
+	}
 	fmt.Fprintf(w, "Host: %s\r\n", host) // write host
 
 	// Use the defaultUserAgent unless the Header contains one, which
@@ -419,6 +473,29 @@ func (r *Request) write(w io.Writer) error {
 	return nil
 }
 
+func (r *Request) Clone() *Request {
+	clone := new(Request)
+	clone.Method = r.Method
+	clone.Proto = r.Proto
+	clone.ProtoMajor = r.ProtoMajor
+	clone.ProtoMinor = r.ProtoMinor
+	clone.RequestURI = r.RequestURI
+	clone.URL = r.URL
+	clone.Header = r.Header.Clone()
+	clone.Body = r.Body
+	clone.ContentLength = r.ContentLength
+	clone.ContentType = r.ContentType
+	clone.RemoteAddress = r.RemoteAddress
+	clone.GetBody = r.GetBody
+	clone.Form = r.Form
+	clone.MultipartForm = r.MultipartForm
+	clone.TLS = r.TLS
+	clone.Trailer = r.Trailer.Clone()
+	clone.TransferEncoding = r.TransferEncoding
+	clone.Close = r.Close
+	return clone
+}
+
 // Reset resets the Request.
 func (p *Request) Reset() {
 	p = new(Request)
@@ -427,6 +504,413 @@ func (p *Request) Reset() {
 // UserAgent returns the client's User-Agent, if sent in the request.
 func (r *Request) UserAgent() string {
 	return r.Header.Get("User-Agent")
+}
+
+// Cookie returns the named cookie provided in the request or
+// [ErrNoCookie] if not found.
+// If multiple cookies match the given name, only one cookie will
+// be returned.
+func (r *Request) Cookie(name string) (*Cookie, error) {
+	if name == "" {
+		return nil, ErrNoCookie
+	}
+	for _, c := range readCookies(r.Header, name) {
+		return c, nil
+	}
+	return nil, ErrNoCookie
+}
+
+// Cookies parses and returns the HTTP cookies sent with the request.
+func (r *Request) Cookies() []*Cookie {
+	return readCookies(r.Header, "")
+}
+
+// AddCookie adds a cookie to the request. Per RFC 6265 section 5.4,
+// AddCookie does not attach more than one [Cookie] header field. That
+// means all cookies, if any, are written into the same line,
+// separated by semicolon.
+// AddCookie only sanitizes c's name and value, and does not sanitize
+// a Cookie header already present in the request.
+func (r *Request) AddCookie(c *Cookie) {
+	if c == nil || (c.Name == "" && c.Value == "") {
+		return
+	}
+	s := fmt.Sprintf("%s=%s", sanitizeCookieName(c.Name), sanitizeCookieValue(c.Value))
+	if c := r.Header.Get("Cookie"); c != "" {
+		r.Header.Set("Cookie", c+"; "+s)
+	} else {
+		r.Header.Set("Cookie", s)
+	}
+}
+
+func (r *Request) FormValue(key string) string {
+	if r.Form == nil {
+		// TODO: Implement parseForm
+		r.ParseForm()
+	}
+	return r.Form.Get(key)
+}
+
+// ToMap returns a map of the request's fields
+func (r *Request) ToMap() map[string]interface{} {
+	return map[string]interface{}{
+		"Method":           r.Method,
+		"URL":              r.URL.String(),
+		"Proto":            r.Proto,
+		"ProtoMajor":       r.ProtoMajor,
+		"ProtoMinor":       r.ProtoMinor,
+		"RequestURI":       r.RequestURI,
+		"Host":             r.Host,
+		"Header":           r.Header,
+		"ContentLength":    r.ContentLength,
+		"ContentType":      r.ContentType,
+		"RemoteAddress":    r.RemoteAddress,
+		"Form":             r.Form,
+		"MultipartForm":    r.MultipartForm,
+		"TLS":              r.TLS,
+		"Trailer":          r.Trailer,
+		"TransferEncoding": r.TransferEncoding,
+		"Body":             r.Body,
+	}
+}
+
+// Serialize the request line
+func (r *Request) RequestLine() string {
+	return r.Method + " " + r.URL.RequestURI() + " " + r.Proto
+}
+
+// Serialize the headers
+func (r *Request) Headers() (string, error) {
+	b := new(bytes.Buffer)
+	err := r.Header.Write(b)
+	if err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
+// Head serializes r without body in wire format
+func (r *Request) Head() ([]byte, error) {
+	rl := r.RequestLine()
+	h, err := r.Headers()
+	if err != nil {
+		return nil, err
+	}
+	s := strings.Join([]string{rl, h, ""}, "\r\n")
+	return []byte(s), nil
+}
+
+// Merge r with other
+func (r *Request) Merge(other *Request) {
+	if r.Method == "" {
+		r.Method = other.Method
+	}
+	if r.Proto == "" {
+		r.Proto = other.Proto
+	}
+	if r.ProtoMinor == 0 {
+		r.ProtoMinor = other.ProtoMinor
+	}
+	if r.ProtoMajor == 0 {
+		r.ProtoMajor = other.ProtoMajor
+	}
+	if r.RequestURI == "" {
+		r.RequestURI = other.RequestURI
+	}
+	if r.URL == nil {
+		r.URL = other.URL
+	}
+	if r.Host == "" {
+		r.Host = other.Host
+	}
+	if r.Header == nil {
+		r.Header = other.Header
+	}
+	if r.Body == nil {
+		r.Body = other.Body
+	}
+	if r.ContentLength == 0 {
+		r.ContentLength = other.ContentLength
+	}
+	if r.ContentType == "" {
+		r.ContentType = other.ContentType
+	}
+	if r.RemoteAddress == "" {
+		r.RemoteAddress = other.RemoteAddress
+	}
+	if r.GetBody == nil {
+		r.GetBody = other.GetBody
+	}
+	if r.Form == nil {
+		r.Form = other.Form
+	}
+	if r.MultipartForm == nil {
+		r.MultipartForm = other.MultipartForm
+	}
+	if r.TLS == nil {
+		r.TLS = other.TLS
+	}
+	if r.Trailer == nil {
+		r.Trailer = other.Trailer
+	}
+}
+
+// Debug prints friendly representation of the request for debugging
+func (r *Request) Debug() string {
+	// Fields
+	lines := []string{
+		"Method: " + r.Method,
+		"URL: " + r.URL.String(),
+		"Proto: " + r.Proto,
+		"ProtoMajor: " + fmt.Sprint(r.ProtoMajor),
+		"ProtoMinor: " + fmt.Sprint(r.ProtoMinor),
+		"RequestURI: " + r.RequestURI,
+		"Host: " + r.Host,
+		"Header: " + fmt.Sprint(r.Header),
+		"ContentLength: " + fmt.Sprint(r.ContentLength),
+		"ContentType: " + r.ContentType,
+		"RemoteAddress: " + r.RemoteAddress,
+		"Form: " + fmt.Sprint(r.Form),
+		"MultipartForm: " + fmt.Sprint(r.MultipartForm),
+		"TLS: " + fmt.Sprint(r.TLS),
+		"Trailer: " + fmt.Sprint(r.Trailer),
+		"TransferEncoding: " + fmt.Sprint(r.TransferEncoding),
+		"Body: " + fmt.Sprint(r.Body),
+	}
+	// If field is a string and empty, replace with escaped quotes
+	for i, line := range lines {
+		sp := strings.Split(line, ": ")
+		if len(sp) != 2 {
+			panic(fmt.Sprintf("invalid line %d: %s", i, line))
+		}
+		if sp[1] == "" {
+			replacedStr := strings.Replace(sp[1], "", "\"\"", -1)
+			lines[i] = sp[0] + ": " + replacedStr
+		}
+	}
+	// Prefix each line with a tab
+	for i, line := range lines {
+		lines[i] = "\t" + line
+	}
+	// Join
+	s := strings.Join(lines, "\n")
+	startLine := fmt.Sprintf("\n&Request(%p){\n", &r)
+	endLine := "\n}\n"
+	// Return string representation of the request
+	return startLine + s + endLine
+}
+
+// Dump serializes the request to wire format (raw http request) for debugging
+func (r *Request) Dump() string {
+	head, _ := r.Head()
+	buf := new(bytes.Buffer)
+	_, err := io.Copy(buf, r.Body)
+	if err != nil {
+		if err != io.EOF {
+			return ""
+		}
+	}
+	return string(append(head, buf.Bytes()...))
+}
+
+// TODO: Implement parseForm
+// ParseForm populates r.Form and r.PostForm.
+//
+// For all requests, ParseForm parses the raw query from the URL and updates
+// r.Form.
+//
+// For POST, PUT, and PATCH requests, it also reads the request body, parses it
+// as a form and puts the results into both r.PostForm and r.Form. Request body
+// parameters take precedence over URL query string values in r.Form.
+//
+// If the request Body's size has not already been limited by MaxBytesReader,
+// the size is capped at 10MB.
+//
+// For other HTTP methods, or when the Content-Type is not
+// application/x-www-form-urlencoded, the request Body is not read, and
+// r.PostForm is initialized to a non-nil, empty value.
+//
+// ParseMultipartForm calls ParseForm automatically.
+// ParseForm is idempotent.
+func (r *Request) ParseForm() error {
+	var err error
+	if r.PostForm == nil {
+		if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
+			r.PostForm, err = parsePostForm(r)
+		}
+		if r.PostForm == nil {
+			r.PostForm = make(url.Values)
+		}
+	}
+	if r.Form == nil {
+		if len(r.PostForm) > 0 {
+			r.Form = make(url.Values)
+			copyValues(r.Form, r.PostForm)
+		}
+		var newValues url.Values
+		if r.URL != nil {
+			var e error
+			newValues, e = url.ParseQuery(r.URL.RawQuery)
+			if err == nil {
+				err = e
+			}
+		}
+		if newValues == nil {
+			newValues = make(url.Values)
+		}
+		if r.Form == nil {
+			r.Form = newValues
+		} else {
+			copyValues(r.Form, newValues)
+		}
+	}
+	return err
+}
+
+// PostFormValue returns the first value for the named component of the POST,
+// PUT, or PATCH request body. URL query parameters are ignored.
+// PostFormValue calls [Request.ParseMultipartForm] and [Request.ParseForm] if necessary and ignores
+// any errors returned by these functions.
+// If key is not present, PostFormValue returns the empty string.
+func (r *Request) PostFormValue(key string) string {
+	if r.PostForm == nil {
+		r.ParseMultipartForm(defaultMaxMemory)
+	}
+	if vs := r.PostForm[key]; len(vs) > 0 {
+		return vs[0]
+	}
+	return ""
+}
+
+// multipartByReader is a sentinel value.
+// Its presence in Request.MultipartForm indicates that parsing of the request
+// body has been handed off to a MultipartReader instead of ParseMultipartForm.
+var multipartByReader = &multipart.Form{
+	Value: make(map[string][]string),
+	File:  make(map[string][]*multipart.FileHeader),
+}
+
+// ParseMultipartForm parses a request body as multipart/form-data.
+// The whole request body is parsed and up to a total of maxMemory bytes of
+// its file parts are stored in memory, with the remainder stored on
+// disk in temporary files.
+// ParseMultipartForm calls [Request.ParseForm] if necessary.
+// If ParseForm returns an error, ParseMultipartForm returns it but also
+// continues parsing the request body.
+// After one call to ParseMultipartForm, subsequent calls have no effect.
+func (r *Request) ParseMultipartForm(maxMemory int64) error {
+	if r.MultipartForm == multipartByReader {
+		return errors.New("http: multipart handled by MultipartReader")
+	}
+	var parseFormErr error
+	if r.Form == nil {
+		// Let errors in ParseForm fall through, and just
+		// return it at the end.
+		parseFormErr = r.ParseForm()
+	}
+	if r.MultipartForm != nil {
+		return nil
+	}
+
+	mr, err := r.multipartReader(false)
+	if err != nil {
+		return err
+	}
+
+	f, err := mr.ReadForm(maxMemory)
+	if err != nil {
+		return err
+	}
+
+	if r.PostForm == nil {
+		r.PostForm = make(url.Values)
+	}
+	for k, v := range f.Value {
+		r.Form[k] = append(r.Form[k], v...)
+		// r.PostForm should also be populated. See Issue 9305.
+		r.PostForm[k] = append(r.PostForm[k], v...)
+	}
+
+	r.MultipartForm = f
+
+	return parseFormErr
+}
+
+// MultipartReader returns a MIME multipart reader if this is a
+// multipart/form-data or a multipart/mixed POST request, else returns nil and an error.
+// Use this function instead of [Request.ParseMultipartForm] to
+// process the request body as a stream.
+func (r *Request) MultipartReader() (*multipart.Reader, error) {
+	if r.MultipartForm == multipartByReader {
+		return nil, errors.New("http: MultipartReader called twice")
+	}
+	if r.MultipartForm != nil {
+		return nil, errors.New("http: multipart handled by ParseMultipartForm")
+	}
+	r.MultipartForm = multipartByReader
+	return r.multipartReader(true)
+}
+
+func (r *Request) multipartReader(allowMixed bool) (*multipart.Reader, error) {
+	v := r.Header.Get("Content-Type")
+	if v == "" {
+		return nil, ErrNotMultipart
+	}
+	if r.Body == nil {
+		return nil, errors.New("missing form body")
+	}
+	d, params, err := mime.ParseMediaType(v)
+	if err != nil || !(d == "multipart/form-data" || allowMixed && d == "multipart/mixed") {
+		return nil, ErrNotMultipart
+	}
+	boundary, ok := params["boundary"]
+	if !ok {
+		return nil, ErrMissingBoundary
+	}
+	return multipart.NewReader(r.Body, boundary), nil
+}
+
+// FormFile returns the first file for the provided form key.
+// FormFile calls [Request.ParseMultipartForm] and [Request.ParseForm] if necessary.
+func (r *Request) FormFile(key string) (multipart.File, *multipart.FileHeader, error) {
+	if r.MultipartForm == multipartByReader {
+		return nil, nil, errors.New("http: multipart handled by MultipartReader")
+	}
+	if r.MultipartForm == nil {
+		err := r.ParseMultipartForm(defaultMaxMemory)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	if r.MultipartForm != nil && r.MultipartForm.File != nil {
+		if fhs := r.MultipartForm.File[key]; len(fhs) > 0 {
+			f, err := fhs[0].Open()
+			return f, fhs[0], err
+		}
+	}
+	return nil, nil, ErrMissingFile
+}
+
+// parseContentType detects the content type in the first 512 bytes of data for the MIME type.
+func (r *Request) parseContentType(b []byte) {
+	ct := SniffContentType(b)
+	// TODO: Finish parsing content type
+	r.Header.Set("Content-Type", ct)
+	r.ContentType = ct
+}
+
+func (r *Request) wantsClose() bool {
+	if r.Close {
+		return true
+	}
+	return hasToken(r.Header.Get("Connection"), "close")
+}
+
+func (r *Request) closeBody() error {
+	if r.Body == nil {
+		return nil
+	}
+	return r.Body.Close()
 }
 
 // ReadRequest reads and parses a request from a reader.
@@ -486,7 +970,7 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 	// 1. Read and parse first Line
 	// TODO: Validate method, path, and protocol and parse HTTP Version
 	line, err := r.ReadString('\n') // read first line
-	defer func() {
+	defer func() {                  // clean up function
 		if err == io.EOF {
 			err = io.ErrUnexpectedEOF
 		}
@@ -494,7 +978,6 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 	if err != nil && err != io.EOF {
 		return nil, err
 	}
-
 	method, requestURI, prot, ok := parseRequestLine(line) // parse first line
 	if !ok {
 		return nil, fmt.Errorf("invalid request line")
@@ -531,6 +1014,7 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 		header.Set(k, v)
 	}
 
+	// 3. Set Request
 	req := &Request{
 		Method:        method,
 		Proto:         prot,
@@ -546,6 +1030,8 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 		RemoteAddress: "",
 	}
 
+	// TODO: Sniff the content type (MIME type) from first 512 bytes of body?
+
 	// RFC 7230, section 5.3: Must treat
 	//	GET /index.html HTTP/1.1
 	//	Host: www.google.com
@@ -558,117 +1044,4 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 	}
 
 	return req, nil
-}
-
-// ErrNoCookie is returned by Request's Cookie method when a cookie is not found.
-var ErrNoCookie = errors.New("http: named cookie not present")
-
-// Cookie returns the named cookie provided in the request or
-// [ErrNoCookie] if not found.
-// If multiple cookies match the given name, only one cookie will
-// be returned.
-func (r *Request) Cookie(name string) (*Cookie, error) {
-	if name == "" {
-		return nil, ErrNoCookie
-	}
-	for _, c := range readCookies(r.Header, name) {
-		return c, nil
-	}
-	return nil, ErrNoCookie
-}
-
-// Cookies parses and returns the HTTP cookies sent with the request.
-func (r *Request) Cookies() []*Cookie {
-	return readCookies(r.Header, "")
-}
-
-// AddCookie adds a cookie to the request. Per RFC 6265 section 5.4,
-// AddCookie does not attach more than one [Cookie] header field. That
-// means all cookies, if any, are written into the same line,
-// separated by semicolon.
-// AddCookie only sanitizes c's name and value, and does not sanitize
-// a Cookie header already present in the request.
-func (r *Request) AddCookie(c *Cookie) {
-	s := fmt.Sprintf("%s=%s", sanitizeCookieName(c.Name), sanitizeCookieValue(c.Value))
-	if c := r.Header.Get("Cookie"); c != "" {
-		r.Header.Set("Cookie", c+"; "+s)
-	} else {
-		r.Header.Set("Cookie", s)
-	}
-}
-
-func (r *Request) FormValue(key string) string {
-	if r.Form == nil {
-		// TODO: Implement parseForm
-		r.ParseForm()
-	}
-	return r.Form.Get(key)
-}
-
-// TODO: Implement parseForm
-// ParseForm populates r.Form and r.PostForm.
-//
-// For all requests, ParseForm parses the raw query from the URL and updates
-// r.Form.
-//
-// For POST, PUT, and PATCH requests, it also reads the request body, parses it
-// as a form and puts the results into both r.PostForm and r.Form. Request body
-// parameters take precedence over URL query string values in r.Form.
-//
-// If the request Body's size has not already been limited by MaxBytesReader,
-// the size is capped at 10MB.
-//
-// For other HTTP methods, or when the Content-Type is not
-// application/x-www-form-urlencoded, the request Body is not read, and
-// r.PostForm is initialized to a non-nil, empty value.
-//
-// ParseMultipartForm calls ParseForm automatically.
-// ParseForm is idempotent.
-func (r *Request) ParseForm() error {
-	var err error
-	if r.PostForm == nil {
-		if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
-			r.PostForm, err = parsePostForm(r)
-		}
-		if r.PostForm == nil {
-			r.PostForm = make(url.Values)
-		}
-	}
-	if r.Form == nil {
-		if len(r.PostForm) > 0 {
-			r.Form = make(url.Values)
-			copyValues(r.Form, r.PostForm)
-		}
-		var newValues url.Values
-		if r.URL != nil {
-			var e error
-			newValues, e = url.ParseQuery(r.URL.RawQuery)
-			if err == nil {
-				err = e
-			}
-		}
-		if newValues == nil {
-			newValues = make(url.Values)
-		}
-		if r.Form == nil {
-			r.Form = newValues
-		} else {
-			copyValues(r.Form, newValues)
-		}
-	}
-	return err
-}
-
-func (r *Request) wantsClose() bool {
-	if r.Close {
-		return true
-	}
-	return hasToken(r.Header.Get("Connection"), "close")
-}
-
-func (r *Request) closeBody() error {
-	if r.Body == nil {
-		return nil
-	}
-	return r.Body.Close()
 }

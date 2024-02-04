@@ -1,8 +1,8 @@
 # Network
 
-Package network is an experimental package for basic network I/O.
+This package is experimental for research & development in networking and I/O.
 
-Its primary job is to wrap existing implementations of such network primitives, such as those in package net, into shared public interfaces that abstract the functionality. 
+Its primary job is to develop simplified networking implementations, wrap existing implementations of such network primitives, such as those in package net, into shared public interfaces that abstract the functionality. 
 
 ## Connection
 
@@ -12,13 +12,15 @@ There are various protocols that govern how this data exchange happens, such as 
 
 **A network connection can be established using various methods, such as sockets**. Once a connection is established, data can be sent back and forth until the connection is closed.
 
+## Protocol
+
 ### TCP
 
 TCP (Transmission Control Protocol) is one of the main protocols in the Internet protocol suite. It's a transport layer protocol that provides reliable, ordered, and error-checked delivery of a stream of bytes between applications running on hosts communicating over an IP network.
 
 TCP is used by many popular application layer protocols, such as HTTP, HTTPS, FTP, SMTP, and more. It's connection-oriented, meaning it requires a connection to be established before data can be sent. This is in contrast to connectionless protocols like UDP, which don't require a connection.
 
-### File
+## File
 
 In Go, a file is represented by the `*os.File` type, which is a pointer to an `os.File` value. This type provides methods for file operations, such as reading, writing, and seeking.
 
@@ -38,7 +40,7 @@ In this example, `os.Open` opens the file named "myfile.txt" and returns a `*os.
 
 The `*os.File` type also implements the `io.Reader`, `io.Writer`, `io.Seeker`, and `io.Closer` interfaces, so you can use it with functions that work with these interfaces. For example, you can use it with the `io.Copy` function to copy data from one file to another, or with the `bufio.Scanner` type to read the file line by line.
 
-#### Everything is a file
+### Everything is a file
 
 In Unix and Unix-like operating systems, including Linux, there's a concept that "everything is a file".
 This means that all I/O devices, including network connections, are treated as files.
@@ -123,74 +125,6 @@ Instead of issuing a read or write operation and possibly getting an error, you 
 In your code, the `poll.DupCloseOnExec` function is likely a part of this non-blocking I/O with polling model. It seems to duplicate the file descriptor `f.Fd()`, setting the new file descriptor to close-on-exec (meaning it will be closed automatically when a new program is executed) and possibly also setting it to non-blocking mode.
 
 
-## HTTP
-HTTP stands for Hypertext Transfer Protocol. It is a protocol used for transmitting hypertext requests and information between servers and browsers. HTTP is the foundation of data communication on the World Wide Web.
-
-Here are some key points about HTTP:
-
-- Stateless: Each request from client to server is processed independently, without any knowledge of the requests that came before it.
-
-- Connectionless: After a request is made, the client disconnects from the server and waits for a response. The server processes the request and re-establishes the connection with the client to send the response back.
-
-- Media Independent: Any type of data can be sent by HTTP as long as both the client and the server know how to handle the data content.
-
-- Methods: HTTP uses methods (also known as verbs) to indicate the desired action to be performed on the identified resource. The most common methods include GET, POST, PUT, DELETE, and HEAD.
-
-In the context of programming, HTTP is often used for API calls, web scraping, and other tasks that involve sending or receiving data over the internet. In Go, the net/http package provides functionalities for HTTP requests and responses.
-
-#### HTTP Message Format
-
-An HTTP message consists of a start-line, headers, and a body, separated by CRLF (\r\n) sequences. The body of the message, also known as the payload, comes after the headers and is optional.
-
-Here's a basic format of an HTTP request message with a body:
-
-```
-POST /path HTTP/1.1\r\n
-Host: www.example.com\r\n
-Content-Type: application/x-www-form-urlencoded\r\n
-Content-Length: length\r\n
-\r\n
-field1=value1&field2=value2
-```
-
-    - The start-line is POST /path HTTP/1.1 and indicates this is a POST request to the /path resource.
-    - The Host header is required in HTTP/1.1 and specifies the domain of the server.
-    - The Content-Type header indicates the media type of the body. In this case, it's application/x-www-form-urlencoded, which is commonly used when submitting HTML forms.
-    - The Content-Length header indicates the length of the body in bytes.
-    - After the headers, there's an empty line (\r\n), which indicates the end of the headers and the start of the body.
-    - The body is field1=value1&field2=value2, which is a URL-encoded form data.
-
-For a JSON payload, the Content-Type would be application/json and the body would contain a JSON object:
-
-```
-POST /path HTTP/1.1\r\n
-Host: www.example.com\r\n
-Content-Type: application/json\r\n
-Content-Length: length\r\n
-\r\n
-{"field1":"value1","field2":"value2"}
-```
-
-#### HTTP Sessions
-
-An HTTP session is a sequence of network request-response transactions. An HTTP client initiates a request. It then waits for the response. The HTTP server processes the request and sends a response back to the client. This exchange is considered one HTTP session.
-
-However, HTTP itself is stateless, meaning each request is processed independently without any knowledge of the requests that came before it. To maintain state between different requests (such as information about whether a user is logged in), many web applications use session cookies, which are sent in the HTTP headers.
-
-A session cookie might contain a session ID that the server can use to retrieve stored information about the client, such as user preferences, shopping cart contents, or authentication status. This allows the server to provide a personalized experience for each client.
-
-In Go, you can use the net/http package's SetCookie function to set session cookies, and the Request type's Cookie method to retrieve them. There are also third-party packages available that provide more advanced session management features.
-
-#### HTTP Cookie
-GitHub Copilot: HTTP cookies are small pieces of data that are sent from a web server to a client (usually a web browser) and stored on the client's computer. Cookies are used to maintain state between requests in a stateless protocol like HTTP.
-
-When a client sends an HTTP request to a server, it can include any cookies that were previously set by the server for that domain. The server can then use the cookies to identify the client and maintain state between requests.
-
-Cookies can have various attributes, such as a name, a value, an expiration time, a domain, a path, and a secure flag. The name and value are used to store data, while the other attributes control how the cookie is transmitted and stored.
-
-Cookies can be used for various purposes, such as session management, user tracking, and personalization. However, cookies can also be used for tracking and advertising purposes, which has led to concerns about privacy and security.
-
-Web browsers typically allow users to view and delete cookies, and some browsers also allow users to block cookies entirely or only accept cookies from certain domains.
 
 
 
@@ -199,28 +133,14 @@ Web browsers typically allow users to view and delete cookies, and some browsers
 
 
 
-## Go
-
-### Workspace
-
-TODO: Explain golang workspace
-
-TODO: explain go.mod
-
-TODO: explain go.work
-
-#### Internal Packages
-
-The internal keyword in Go is a special directory name that restricts the accessibility of the packages inside it.
-Packages inside an internal directory can only be imported and used by the code that is in the same parent directory.
-
-The internal package is mainly used for internal implementation details that are shared across multiple packages within the parent package.
-
-In the case of net/internal, it contains implementation details and helper functions that are used by other packages within the net package, but are not intended to be directly used by programs that import the net package. This is a way to hide implementation details and prevent them from becoming part of the package's public API.
 
 ## Examples
 
-### Read file using bufio.Reader
+### Read
+
+Read input.
+
+#### Read file using bufio.Reader
 
 When reading from a file in Go, it's generally best practice to use a bufio.Reader to buffer the input. This can improve performance by reducing the number of system calls needed to read the file.
 
@@ -247,7 +167,7 @@ for{
 }
 ```
 
-### Read File
+#### Read File
 
 ```go
     // Open the file for reading
@@ -278,8 +198,11 @@ for{
     }
 ```
 
+### Write
 
-### Read and Write to file
+Write output.
+
+#### Read and Write to file
 
 
 ```go
@@ -339,35 +262,4 @@ func main() {
     }
 }
 ```
-
-### Response
-
-Here's an example of a raw HTTP response with a cookie:
-
-```
-HTTP/1.1 200 OK
-Content-Type: text/plain
-Set-Cookie: mycookie=value; Path=/; Domain=example.com; Expires=Wed, 21 Oct 2021 07:28:00 GMT; Max-Age=3600; Secure
-Content-Length: 13
-
-Hello, world!
-```
-
-In this example, the response has a status line "HTTP/1.1 200 OK". The `Content-Type` header is set to "text/plain", indicating that the response body is plain text. The `Set-Cookie` header sets a cookie with a name "mycookie", a value "value", and various attributes such as `Path`, `Domain`, `Expires`, `Max-Age`, and `Secure`. The `Content-Length` header is set to 13, indicating that the response body has 13 bytes.
-
-The response body is "Hello, world!", which is 13 bytes long and matches the `Content-Length` header.
-
-### Request 
-
-Here's an example of a raw HTTP request with a cookie:
-
-```
-GET / HTTP/1.1
-Host: example.com
-Cookie: mycookie=value; othercookie=othervalue
-```
-
-In this example, the request is a GET request for the root path ("/") of the "example.com" domain. The `Host` header is set to "example.com", indicating the domain of the request. The `Cookie` header sets two cookies: "mycookie" with a value "value" and "othercookie" with a value "othervalue".
-
-Note that the `Cookie` header can contain multiple cookies separated by semicolons. Each cookie is a name-value pair separated by an equals sign. The name and value are both URL-encoded.
 

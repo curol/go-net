@@ -101,7 +101,7 @@ type Response struct {
 	StatusText string // e.g., "OK"
 
 	// 2.) Headers come after the response line and each header is a new line of format "<key>: <value>".
-	header        Header
+	Header        Header
 	ContentLength int
 	ContentType   string
 
@@ -131,15 +131,11 @@ func NewResponse(conn net.Conn) *Response {
 		Proto:         protocol, // default protocol
 		StatusCode:    200,      // default status code
 		StatusText:    "OK",     // default status text
-		header:        NewHeader(),
+		Header:        NewHeader(),
 		Body:          nil,
 		ContentLength: 0,
 		conn:          conn,
 	}
-}
-
-func (r *Response) Header() Header {
-	return r.header
 }
 
 // Close closes the connection and writes io.EOF to the connection.
@@ -204,7 +200,7 @@ func (r *Response) write(w *bufio.Writer) (int64, error) {
 	}
 
 	// 2. Header
-	err = r.header.Write(w)
+	err = r.Header.Write(w)
 	if err != nil {
 		return 0, err
 	}
@@ -236,6 +232,11 @@ func (r *Response) write(w *bufio.Writer) (int64, error) {
 	return int64(w.Size()), err
 }
 
+// Cookies parses and returns the cookies set in the Set-Cookie headers.
+func (r *Response) Cookies() []*Cookie {
+	return readSetCookies(r.Header)
+}
+
 // // ToBuffer encodes the request into a *bytes.Buffer.
 // func (r *Response) ToBuffer() (*bytes.Buffer, error) {
 // 	buf := bytes.NewBuffer(nil)
@@ -251,8 +252,8 @@ func (r *Response) write(w *bufio.Writer) (int64, error) {
 func (r *Response) Text(s string) {
 	ct := "text/plain"
 	cl := strconv.Itoa(len(s))
-	r.header.Set("Content-Type", ct)
-	r.header.Set("Content-Length", cl)
+	r.Header.Set("Content-Type", ct)
+	r.Header.Set("Content-Length", cl)
 
 	r.Body = io.NopCloser(bytes.NewBufferString(s))
 }
@@ -263,8 +264,8 @@ func (r *Response) JSON(v any) error {
 	if err != nil {
 		return err
 	}
-	r.header.Set("Content-Type", "application/json")
-	r.header.Set("Content-Length", strconv.Itoa(len(result)))
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Content-Length", strconv.Itoa(len(result)))
 
 	r.Body = io.NopCloser(bytes.NewBuffer(result))
 
@@ -274,8 +275,8 @@ func (r *Response) JSON(v any) error {
 func (r *Response) HTML(s string) {
 	ct := "text/html"
 	cl := strconv.Itoa(len(s))
-	r.header.Set("Content-Type", ct)
-	r.header.Set("Content-Length", cl)
+	r.Header.Set("Content-Type", ct)
+	r.Header.Set("Content-Length", cl)
 
 	r.Body = io.NopCloser(bytes.NewBufferString(s))
 }
@@ -283,8 +284,8 @@ func (r *Response) HTML(s string) {
 func (r *Response) XML(s string) {
 	ct := "text/xml"
 	cl := strconv.Itoa(len(s))
-	r.header.Set("Content-Type", ct)
-	r.header.Set("Content-Length", cl)
+	r.Header.Set("Content-Type", ct)
+	r.Header.Set("Content-Length", cl)
 
 	r.Body = io.NopCloser(bytes.NewBufferString(s))
 }
@@ -292,8 +293,8 @@ func (r *Response) XML(s string) {
 func (r *Response) JSONP(s string) {
 	ct := "application/javascript"
 	cl := strconv.Itoa(len(s))
-	r.header.Set("Content-Type", ct)
-	r.header.Set("Content-Length", cl)
+	r.Header.Set("Content-Type", ct)
+	r.Header.Set("Content-Length", cl)
 
 	r.Body = io.NopCloser(bytes.NewBufferString(s))
 }
@@ -309,8 +310,8 @@ func (r *Response) File(s string) {
 		panic(err)
 	}
 	cl := strconv.FormatInt(stat.Size(), 10) // Convert cl to a string
-	r.header.Set("Content-Type", ct)
-	r.header.Set("Content-Length", cl)
+	r.Header.Set("Content-Type", ct)
+	r.Header.Set("Content-Length", cl)
 
 	// TODO: Use io.NopCloser()?
 	// r.body = io.NopCloser(f)
@@ -411,7 +412,7 @@ func readResponse(r io.Reader) (*Response, error) {
 	resp.StatusText = strings.TrimSpace(statusLines[2])
 
 	// 2.) Headers
-	resp.header = NewHeader()
+	resp.Header = NewHeader()
 	for {
 		line, err := reader.ReadString('\n') // read line
 		if err != nil {
@@ -431,11 +432,11 @@ func readResponse(r io.Reader) (*Response, error) {
 		}
 		key := strings.TrimSpace(parts[0])
 		value := strings.TrimSpace(parts[1])
-		resp.header.Set(key, value)
+		resp.Header.Set(key, value)
 	}
 
 	// TODO: 3.) Body
-	cl := resp.header.Get("Content-Length")
+	cl := resp.Header.Get("Content-Length")
 	if cl != "" {
 		// if err != nil {
 		// 	return resp, fmt.Errorf("Error parsing 'Content-Length': %s", err)

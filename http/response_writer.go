@@ -88,12 +88,19 @@ type clientConn struct {
 	net.Conn
 }
 
+func newResponseWriter(conn net.Conn) *responseWriter {
+	return &responseWriter{
+		client: &clientConn{conn},
+		res:    NewResponse(conn),
+	}
+}
+
 func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return rw.client, bufio.NewReadWriter(bufio.NewReader(rw.client), bufio.NewWriter(rw.client)), nil
 }
 
 func (rw *responseWriter) Header() Header {
-	return rw.res.Header()
+	return rw.res.Header
 }
 
 func (rw *responseWriter) Write(b []byte) (int, error) {
@@ -102,11 +109,4 @@ func (rw *responseWriter) Write(b []byte) (int, error) {
 
 func (rw *responseWriter) WriteHeader(statusCode int) {
 	rw.res.WriteHeader(statusCode)
-}
-
-func newResponseWriter(conn net.Conn) *responseWriter {
-	return &responseWriter{
-		client: &clientConn{conn},
-		res:    NewResponse(conn),
-	}
 }

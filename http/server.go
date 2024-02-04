@@ -41,21 +41,108 @@ type Hijacker interface {
 	Hijack() (net.Conn, *bufio.ReadWriter, error)
 }
 
-// ListenAndServe listens on the TCP network address addr and then calls
-// [Serve] with handler to handle requests on incoming connections.
-// Accepted connections are configured to enable TCP keep-alives.
-//
-// The handler is typically nil, in which case [DefaultServeMux] is used.
-//
-// ListenAndServe always returns a non-nil error.
-func ListenAndServe(addr string, handler Handler) error {
-	server := &Server{Address: addr, Handler: handler}
-	return server.listenAndServe()
+// // ListenAndServe listens on the TCP network address addr and then calls
+// // [Serve] with handler to handle requests on incoming connections.
+// // Accepted connections are configured to enable TCP keep-alives.
+// //
+// // The handler is typically nil, in which case [DefaultServeMux] is used.
+// //
+// // ListenAndServe always returns a non-nil error.
+// func ListenAndServe(addr string, handler Handler) error {
+// 	server := &Server{Address: addr, Handler: handler}
+// 	return server.listenAndServe()
+// }
+
+type Server struct {
+	// Connection
+	Network  string
+	Address  string
+	Deadline time.Time
+	// ErrorLog specifies an optional logger for errors accepting
+	// connections, unexpected behavior from handlers, and
+	// underlying FileSystem errors.
+	// If nil, logging is done via the log package's standard logger.
+	ErrorLog *log.Logger
+	// Misc
+	Logger Log
+
+	Handler Handler // handler to invoke, http.DefaultServeMux if nil
+	// Connection
+	listener net.Listener
+
+	// TLSConfig optionally provides a TLS configuration for use
+	// by ServeTLS and ListenAndServeTLS. Note that this value is
+	// cloned by ServeTLS and ListenAndServeTLS, so it's not
+	// possible to modify the configuration with methods like
+	// tls.Config.SetSessionTicketKeys. To use
+	// SetSessionTicketKeys, use Server.Serve with a TLS Listener
+	// instead.
+	TLSConfig *tls.Config
+
+	// ReadTimeout is the maximum duration for reading the entire
+	// request, including the body. A zero or negative value means
+	// there will be no timeout.
+	//
+	// Because ReadTimeout does not let Handlers make per-request
+	// decisions on each request body's acceptable deadline or
+	// upload rate, most users will prefer to use
+	// ReadHeaderTimeout. It is valid to use them both.
+	ReadTimeout time.Duration
+
+	// ReadHeaderTimeout is the amount of time allowed to read
+	// request headers. The connection's read deadline is reset
+	// after reading the headers and the Handler can decide what
+	// is considered too slow for the body. If ReadHeaderTimeout
+	// is zero, the value of ReadTimeout is used. If both are
+	// zero, there is no timeout.
+	ReadHeaderTimeout time.Duration
+
+	// WriteTimeout is the maximum duration before timing out
+	// writes of the response. It is reset whenever a new
+	// request's header is read. Like ReadTimeout, it does not
+	// let Handlers make decisions on a per-request basis.
+	// A zero or negative value means there will be no timeout.
+	WriteTimeout time.Duration
+
+	// IdleTimeout is the maximum amount of time to wait for the
+	// next request when keep-alives are enabled. If IdleTimeout
+	// is zero, the value of ReadTimeout is used. If both are
+	// zero, there is no timeout.
+	IdleTimeout time.Duration
+
+	// MaxHeaderBytes controls the maximum number of bytes the
+	// server will read parsing the request header's keys and
+	// values, including the request line. It does not limit the
+	// size of the request body.
+	// If zero, DefaultMaxHeaderBytes is used.
+	MaxHeaderBytes int
 }
 
-// Serve starts the server and listens for connections.
-// Listen listens on the TCP network and accepts incoming connections concurrently.
-// The handler handles a request and response for the client.
+type ServerConfig struct {
+	*Server
+}
+
+func NewServer(network string, address string) *Server {
+	if network == "" {
+		network = "tcp"
+	}
+	server := &Server{ // default server
+		Network:  network,
+		Address:  address,
+		Logger:   NewLogger(),
+		Handler:  NewMux(),
+		Deadline: time.Now().Add(5 * time.Minute), // TODO: Set default deadlines
+		listener: nil,
+	}
+	return server
+}
+
+func (s *Server) ListenAndServe() error {
+	return s.listenAndServe()
+}
+
+// listenAndServe starts the server, listens for connections, and serves them concurrently.
+// A handler is called for each connection.
 func (s *Server) listenAndServe() error {
 	network := s.Network
 	address := s.Address
@@ -133,87 +220,6 @@ func (s *Server) serve(conn net.Conn) {
 	s.Handler.ServeHTTP(rw, req)
 }
 
-type Server struct {
-	// Connection
-	Network  string
-	Address  string
-	Deadline time.Time
-	// ErrorLog specifies an optional logger for errors accepting
-	// connections, unexpected behavior from handlers, and
-	// underlying FileSystem errors.
-	// If nil, logging is done via the log package's standard logger.
-	ErrorLog *log.Logger
-	// Misc
-	Logger Log
-
-	Handler Handler // handler to invoke, http.DefaultServeMux if nil
-	// Connection
-	listener net.Listener
-
-	// TLSConfig optionally provides a TLS configuration for use
-	// by ServeTLS and ListenAndServeTLS. Note that this value is
-	// cloned by ServeTLS and ListenAndServeTLS, so it's not
-	// possible to modify the configuration with methods like
-	// tls.Config.SetSessionTicketKeys. To use
-	// SetSessionTicketKeys, use Server.Serve with a TLS Listener
-	// instead.
-	TLSConfig *tls.Config
-
-	// ReadTimeout is the maximum duration for reading the entire
-	// request, including the body. A zero or negative value means
-	// there will be no timeout.
-	//
-	// Because ReadTimeout does not let Handlers make per-request
-	// decisions on each request body's acceptable deadline or
-	// upload rate, most users will prefer to use
-	// ReadHeaderTimeout. It is valid to use them both.
-	ReadTimeout time.Duration
-
-	// ReadHeaderTimeout is the amount of time allowed to read
-	// request headers. The connection's read deadline is reset
-	// after reading the headers and the Handler can decide what
-	// is considered too slow for the body. If ReadHeaderTimeout
-	// is zero, the value of ReadTimeout is used. If both are
-	// zero, there is no timeout.
-	ReadHeaderTimeout time.Duration
-
-	// WriteTimeout is the maximum duration before timing out
-	// writes of the response. It is reset whenever a new
-	// request's header is read. Like ReadTimeout, it does not
-	// let Handlers make decisions on a per-request basis.
-	// A zero or negative value means there will be no timeout.
-	WriteTimeout time.Duration
-
-	// IdleTimeout is the maximum amount of time to wait for the
-	// next request when keep-alives are enabled. If IdleTimeout
-	// is zero, the value of ReadTimeout is used. If both are
-	// zero, there is no timeout.
-	IdleTimeout time.Duration
-
-	// MaxHeaderBytes controls the maximum number of bytes the
-	// server will read parsing the request header's keys and
-	// values, including the request line. It does not limit the
-	// size of the request body.
-	// If zero, DefaultMaxHeaderBytes is used.
-	MaxHeaderBytes int
-}
-
-func NewServer(address string, config *ServerConfig) *Server {
-	server := &Server{ // default server
-		Address:  address,
-		Logger:   NewLogger(),
-		Handler:  NewMux(),
-		Network:  "tcp",
-		Deadline: time.Now().Add(5 * time.Minute),
-		listener: nil,
-	}
-	return server
-}
-
-type ServerConfig struct {
-	*Server
-}
-
 var invalidRequestURIErr = fmt.Errorf("Invalid request URI")
 
 //**********************************************************************************************************************
@@ -243,3 +249,53 @@ func parseConnection(conn net.Conn) (*parsedConnection, error) {
 	pc.host = u.Host
 	return pc, nil
 }
+
+// TimeFormat is the time format to use when generating times in HTTP
+// headers. It is like [time.RFC1123] but hard-codes GMT as the time
+// zone. The time being formatted must be in UTC for Format to
+// generate the correct format.
+//
+// For parsing this time format, see [ParseTime].
+const TimeFormat = "Mon, 02 Jan 2006 15:04:05 GMT"
+
+// appendTime is a non-allocating version of []byte(t.UTC().Format(TimeFormat))
+func appendTime(b []byte, t time.Time) []byte {
+	const days = "SunMonTueWedThuFriSat"
+	const months = "JanFebMarAprMayJunJulAugSepOctNovDec"
+
+	t = t.UTC()
+	yy, mm, dd := t.Date()
+	hh, mn, ss := t.Clock()
+	day := days[3*t.Weekday():]
+	mon := months[3*(mm-1):]
+
+	return append(b,
+		day[0], day[1], day[2], ',', ' ',
+		byte('0'+dd/10), byte('0'+dd%10), ' ',
+		mon[0], mon[1], mon[2], ' ',
+		byte('0'+yy/1000), byte('0'+(yy/100)%10), byte('0'+(yy/10)%10), byte('0'+yy%10), ' ',
+		byte('0'+hh/10), byte('0'+hh%10), ':',
+		byte('0'+mn/10), byte('0'+mn%10), ':',
+		byte('0'+ss/10), byte('0'+ss%10), ' ',
+		'G', 'M', 'T')
+}
+
+// Helper handlers
+
+// Error replies to the request with the specified error message and HTTP code.
+// It does not otherwise end the request; the caller should ensure no further
+// writes are done to w.
+// The error message should be plain text.
+func Error(w ResponseWriter, error string, code int) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(code)
+	fmt.Fprintln(w, error)
+}
+
+// NotFound replies to the request with an HTTP 404 not found error.
+func NotFound(w ResponseWriter, r *Request) { Error(w, "404 page not found", StatusNotFound) }
+
+// NotFoundHandler returns a simple request handler
+// that replies to each request with a “404 page not found” reply.
+func NotFoundHandler() Handler { return HandlerFunc(NotFound) }

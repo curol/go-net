@@ -12,13 +12,13 @@ import (
 // The algorithm uses at most sniffLen bytes to make its decision.
 const sniffLen = 512
 
-// DetectContentType implements the algorithm described
-// at https://mimesniff.spec.whatwg.org/ to determine the
+// SniffContentType implements the algorithm described
+// at https://mimesniff.spec.whatwg.org/ to detect the
 // Content-Type of the given data. It considers at most the
 // first 512 bytes of data. DetectContentType always returns
 // a valid MIME type: if it cannot determine a more specific one, it
 // returns "application/octet-stream".
-func DetectContentType(data []byte) string {
+func SniffContentType(data []byte) string {
 	if len(data) > sniffLen {
 		data = data[:sniffLen]
 	}
