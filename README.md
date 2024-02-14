@@ -4,6 +4,21 @@ This package is experimental for research & development in networking and I/O.
 
 Its primary job is to develop simplified networking implementations, wrap existing implementations of such network primitives, such as those in package net, into shared public interfaces that abstract the functionality. 
 
+## Client
+
+For control over HTTP client headers, redirect policy, and other settings, create a Client:
+
+```
+```
+
+## Transport
+For control over proxies, TLS configuration, keep-alives, compression, and other settings, create a Transport:
+
+## Server
+
+ListenAndServe starts an HTTP server with a given address and handler. The handler is usually nil, which means to use DefaultServeMux. Handle and HandleFunc add handlers to DefaultServeMux:
+
+
 ## Connection
 
 A network connection often refers to the communication link between two programs running on the network. This connection allows the programs to exchange data.

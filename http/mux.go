@@ -2,14 +2,17 @@ package http
 
 import (
 	"sort"
-	"strings"
-	"sync"
 )
 
 // DefaultServeMux is the default [ServeMux] used by [Serve].
-var DefaultServeMux = &defaultServeMux
+var DefaultServeMux *Mux
 
-var defaultServeMux ServeMux
+func init() {
+	DefaultServeMux = &Mux{
+		m:     make(map[string]muxEntry),
+		hosts: false,
+	}
+}
 
 // Mux implements interface Handler for handling requests.
 // ServeMux is an HTTP request multiplexer.
@@ -143,10 +146,8 @@ var defaultServeMux ServeMux
 //
 // ```
 type Mux struct {
-	// mu sync.RWMutex
-	// tree routingNode
-	// index  routingIndex
-	// patterns []*pattern
+	m     map[string]muxEntry
+	hosts bool
 }
 
 // NewMux returns a new Mux.
@@ -154,28 +155,14 @@ func NewMux() *Mux {
 	return &Mux{}
 }
 
-// ServeConn handles a request and response for the client.
-func (m *Mux) ServeHTTP(w ResponseWriter, r *Request) {}
-
-// Default server mux
-type ServeMux struct {
-	mu    sync.RWMutex
-	m     map[string]muxEntry
-	es    []muxEntry // slice of entries sorted from longest to shortest.
-	hosts bool       // whether any patterns contain hostnames
-}
-
-// ServeConn handles a request and response for the client.
-func (mux *ServeMux) ServeHTTP(w ResponseWriter, r *Request) {
-	if r.RequestURI == "*" {
-		// TODO: Handle OPTIONS request
-		// if r.ProtoAtLeast(1, 1) {
-		// 	w.Header().Set("Connection", "close")
-		// }
-		w.WriteHeader(StatusBadRequest)
-		return
+// ServeHttp finds a handler for the request and calls that handler's ServeHTTP method to handle the request.
+func (m *Mux) ServeHTTP(w ResponseWriter, r *Request) {
+	// Find handler
+	h, _ := m.findHandler(r.Host, r.URL.Path)
+	if h == nil {
+		h = NotFoundHandler()
 	}
-	h, _ := mux.FindHandler(r)
+	// Serve handler
 	h.ServeHTTP(w, r)
 }
 
@@ -184,30 +171,15 @@ type muxEntry struct {
 	pattern string
 }
 
-// NewServeMux allocates and returns a new ServeMux.
-func NewServeMux() *ServeMux {
-	return &ServeMux{}
-}
-
 // HandleFunc registers the handler function for the given pattern.
-func (mux *ServeMux) HandleFunc(pattern string, handler func(ResponseWriter, *Request)) {
-	mux.handleFunc(pattern, handler)
-}
-
-func (mux *ServeMux) handleFunc(pattern string, handler func(ResponseWriter, *Request)) {
+func (mux *Mux) HandleFunc(pattern string, handler func(ResponseWriter, *Request)) {
 	if handler == nil {
 		panic("http: nil handler")
 	}
-	mux.Register(pattern, HandlerFunc(handler))
+	mux.register(pattern, HandlerFunc(handler))
 }
 
-func (mux *ServeMux) Register(pattern string, handler Handler) {
-	mux.mu.Lock()
-	defer mux.mu.Unlock()
-	mux.register(pattern, handler)
-}
-
-func (mux *ServeMux) register(pattern string, handler Handler) {
+func (mux *Mux) register(pattern string, handler Handler) {
 	if pattern == "" {
 		panic("http: invalid pattern " + pattern)
 	}
@@ -223,10 +195,6 @@ func (mux *ServeMux) register(pattern string, handler Handler) {
 
 	e := muxEntry{h: handler, pattern: pattern}
 	mux.m[pattern] = e
-	if pattern[len(pattern)-1] == '/' {
-		mux.es = appendSorted(mux.es, e)
-	}
-
 	if pattern[0] != '/' {
 		mux.hosts = true
 	}
@@ -247,19 +215,21 @@ func appendSorted(es []muxEntry, e muxEntry) []muxEntry {
 	return es
 }
 
-// FindHandler returns the handler to use for the given request, consulting r.Method, r.Host, and r.URL.Path.
-// It always returns a non-nil handler.
-// If the path is not in its canonical form, the handler will be an internally-generated handler that
-// redirects to the canonical path.
-func (mux *ServeMux) FindHandler(r *Request) (h Handler, pattern string) {
-	return mux.findHandler(r.Host, r.URL.Path)
+// Handle registers the handler for the given pattern.
+//
+// Example:
+//
+//	http.Handle("/", http.FileServer(http.Dir("/tmp")))
+//	http.Handle("/test", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+//		fmt.Fprintf(w, "Hello, %q", html.EscapeString(r.URL.Path))
+//	}))
+func Handle(pattern string, handler Handler) {
+	DefaultServeMux.register(pattern, handler)
 }
 
 // handler is the main implementation of Handler.
 // The path is known to be in canonical form, except for CONNECT methods.
-func (mux *ServeMux) findHandler(host, path string) (h Handler, pattern string) {
-	mux.mu.RLock()
-	defer mux.mu.RUnlock()
+func (mux *Mux) findHandler(host, path string) (h Handler, pattern string) {
 	// Host-specific pattern takes precedence over generic ones
 	if mux.m != nil {
 		// if e, ok := mux.m[path]; ok {
@@ -272,44 +242,11 @@ func (mux *ServeMux) findHandler(host, path string) (h Handler, pattern string) 
 
 // Find a handler on a handler map given a path string.
 // Most-specific (longest) pattern wins.
-func (mux *ServeMux) match(path string) (h Handler, pattern string) {
+func (mux *Mux) match(path string) (h Handler, pattern string) {
 	// Check for exact match first.
 	v, ok := mux.m[path]
 	if ok {
 		return v.h, v.pattern
 	}
-
-	// Check for longest valid match.  mux.es contains all patterns
-	// that end in / sorted from longest to shortest.
-	for _, e := range mux.es {
-		if strings.HasPrefix(path, e.pattern) {
-			return e.h, e.pattern
-		}
-	}
 	return nil, ""
-}
-
-// // A mapping is a collection of key-value pairs where the keys are unique.
-// // A zero mapping is empty and ready to use.
-// // A mapping tries to pick a representation that makes [mapping.find] most efficient.
-// type mapping[K comparable, V any] struct {
-// 	s []entry[K, V] // for few pairs
-// 	m map[K]V       // for many pairs
-// }
-
-// type entry[K comparable, V any] struct {
-// 	key   K
-// 	value V
-// }
-
-// Handle registers the handler for the given pattern.
-//
-// Example:
-//
-//	http.Handle("/", http.FileServer(http.Dir("/tmp")))
-//	http.Handle("/test", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-//		fmt.Fprintf(w, "Hello, %q", html.EscapeString(r.URL.Path))
-//	}))
-func Handle(pattern string, handler Handler) {
-	DefaultServeMux.Register(pattern, handler)
 }

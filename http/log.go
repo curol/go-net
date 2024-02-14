@@ -8,6 +8,8 @@ import (
 type Log interface {
 	Status(path, method, remoteAddress string) // Log status
 	Fatal(error)                               // Log error and exit
+	Info(string)                               // Log info
+	Warn(string)                               // Log warning
 	// TODO: Add more logging methods
 }
 
@@ -32,6 +34,32 @@ func (l *logger) Status(addr, method, path string) {
 	s := "%s Status: (remote: %s) (method: %s) (path: %s)\n"
 	s = fmt.Sprintf(s, timeFormat, addr, path, method)
 	fmt.Println(green + s + reset)
+}
+
+func (l *logger) Warn(msg string) {
+	// Color
+	yellow := "\033[33m"
+	reset := "\033[0m"
+	// Time
+	now := time.Now()
+	timeFormat := now.Format(l.format)
+
+	s := "%s Warning: %s\n"
+	s = fmt.Sprintf(s, timeFormat, msg)
+	fmt.Println(yellow + s + reset)
+}
+
+func (l *logger) Info(msg string) {
+	// Color
+	blue := "\033[34m"
+	reset := "\033[0m"
+	// Time
+	now := time.Now()
+	timeFormat := now.Format(l.format)
+
+	s := "%s Info: %s\n"
+	s = fmt.Sprintf(s, timeFormat, msg)
+	fmt.Println(blue + s + reset)
 }
 
 // Fatal logs error and exits

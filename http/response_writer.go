@@ -2,6 +2,8 @@ package http
 
 import (
 	"bufio"
+	"bytes"
+	"io"
 	"net"
 )
 
@@ -79,24 +81,23 @@ type ResponseWriter interface {
 // responseWriter is the default implementation of [ResponseWriter] for the server.
 // Moreover, responseWriter is just a wrapper around [Response] and [serverConn].
 type responseWriter struct {
-	client *clientConn
-	res    *Response
+	conn net.Conn
+	res  *Response
+	req  *Request
+	buf  *bytes.Buffer
 }
 
-// clientConn is a wrapper around net.Conn for the server.
-type clientConn struct {
-	net.Conn
-}
-
-func newResponseWriter(conn net.Conn) *responseWriter {
+func newResponseWriter(conn net.Conn, req *Request) *responseWriter {
 	return &responseWriter{
-		client: &clientConn{conn},
-		res:    NewResponse(conn),
+		conn: conn,
+		res:  NewResponse(conn),
+		req:  req,
+		buf:  bytes.NewBuffer(nil),
 	}
 }
 
 func (rw *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
-	return rw.client, bufio.NewReadWriter(bufio.NewReader(rw.client), bufio.NewWriter(rw.client)), nil
+	return rw.conn, bufio.NewReadWriter(bufio.NewReader(rw.conn), bufio.NewWriter(rw.conn)), nil
 }
 
 func (rw *responseWriter) Header() Header {
@@ -104,9 +105,39 @@ func (rw *responseWriter) Header() Header {
 }
 
 func (rw *responseWriter) Write(b []byte) (int, error) {
-	return rw.res.Write(b)
+	return rw.buf.Write(b)
 }
 
 func (rw *responseWriter) WriteHeader(statusCode int) {
 	rw.res.WriteHeader(statusCode)
+}
+
+func (rw *responseWriter) Close() error {
+	return rw.conn.Close()
+}
+
+func (rw *responseWriter) WriteTo(w io.Writer) (int64, error) {
+	rw.conn.Write([]byte("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"))
+	return 0, nil
+	// res := rw.res
+	// body := rw.buf
+	// cl := rw.buf.Len()
+	// clstr := strconv.Itoa(cl)
+
+	// res.ContentLength = cl
+	// res.Header.Set("Content-Length", clstr)
+	// res.Body = io.NopCloser(body)
+	// return res.WriteTo(w)
+}
+
+func (rw *responseWriter) Text(s string) {
+	rw.res.Text(s)
+}
+
+func (rw *responseWriter) HTML(s string) {
+	rw.res.HTML(s)
+}
+
+func (rw *responseWriter) JSON(s string) {
+	rw.res.JSON(s)
 }

@@ -23,14 +23,21 @@ type Client struct {
 	res  *Response // response
 }
 
+type ClientResponse struct {
+	client   *Client
+	Response *Response
+	Data     []byte
+}
+
 func NewClient(method string, address string, header map[string][]string, body io.Reader) *Client {
+	// Set request line
 	method = strings.ToUpper(strings.TrimSpace(method))
 	address = strings.TrimSpace(address)
 	u, err := url.Parse(address)
 	if err != nil {
 		panic(err)
 	}
-
+	// Create client
 	client := &Client{
 		network:  "tcp",
 		protocol: "HTTP/1.1",
@@ -41,7 +48,38 @@ func NewClient(method string, address string, header map[string][]string, body i
 		url:      u,
 	}
 	return client
+}
 
+func (c *Client) Do() *Response {
+	// 1. Connect
+	c.dial()
+
+	// 2. Clean up
+	defer c.clean()
+
+	// 3. Write request
+	req, err := NewRequest(c.method, c.address, c.header, io.NopCloser(c.body))
+	if err != nil {
+		panic(err)
+	}
+	err = req.Write(c.conn)
+	if err != nil {
+		if err != io.EOF {
+			panic(err)
+		}
+	}
+	c.req = req
+
+	// 4. Read response
+	// io.Copy(c.conn, c.res.Body)
+	resp, err := ReadResponse(c.conn)
+	if err != nil {
+		if err != io.EOF {
+			panic(err)
+		}
+	}
+	c.res = resp
+	return resp
 }
 
 // Connect connects to the server.
@@ -52,7 +90,7 @@ func NewClient(method string, address string, header map[string][]string, body i
 // client.writeRequest() // 3
 // client.readResponse() // 4
 // return client
-func (c *Client) connect() {
+func (c *Client) dial() {
 	conn, err := net.Dial(c.network, c.address) // start connection
 	if err != nil {
 		panic(err)
@@ -60,31 +98,18 @@ func (c *Client) connect() {
 	c.conn = conn
 }
 
-// WriteRequest writes the request to the server.
-func (c *Client) writeRequest() {
-	req, err := NewRequest(c.method, c.address, c.header, io.NopCloser(c.body))
-	if err != nil {
-		panic(err)
-	}
+func (c *Client) Close() error {
+	return c.conn.Close()
+}
 
-	err = req.Write(c.conn) // write request
-	if err != nil {
-		if err != io.EOF {
-			panic(err)
-		}
-	}
-	c.req = req
+// WriteRequest writes the request to the server.
+func (c *Client) write() error {
+	return c.req.Write(c.conn)
 }
 
 // ReadResponse reads the response from the server.
-func (c *Client) readResponse() {
-	resp, err := ReadResponse(c.conn) // read response
-	if err != nil {
-		if err != io.EOF {
-			panic(err)
-		}
-	}
-	c.res = resp
+func (c *Client) read() (int64, error) {
+	return c.res.WriteTo(c.conn)
 }
 
 func (c *Client) readN(n int, conn net.Conn) (buf []byte, err error) {

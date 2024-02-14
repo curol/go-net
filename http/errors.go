@@ -1,6 +1,9 @@
 package http
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // ErrMissingFile is returned by FormFile when the provided file field name
 // is either not present in the request or not a file field.
@@ -63,3 +66,5 @@ var (
 	// compare errors against this variable.
 	ErrMissingContentLength = &ProtocolError{"missing ContentLength in HEAD response"}
 )
+
+var invalidRequestURIErr = fmt.Errorf("Invalid request URI")

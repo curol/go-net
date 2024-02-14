@@ -188,12 +188,16 @@ func (r *Response) WriteTo(w io.Writer) (int64, error) {
 
 // write serializes the response to the writer.
 func (r *Response) write(w *bufio.Writer) (int64, error) {
+	if r == nil {
+		return 0, fmt.Errorf("response is nil")
+	}
 	// 1. Response line
 	rl := fmt.Sprintf("%s %s %s\r\n", r.Proto, strconv.Itoa(r.StatusCode), r.StatusText)
 	_, err := w.Write([]byte(rl))
 	if err != nil {
 		return 0, err
 	}
+
 	err = w.Flush() // flush request line
 	if err != nil {
 		return 0, err
