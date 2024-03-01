@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net"
@@ -21,12 +22,6 @@ type Client struct {
 	conn net.Conn  // connection to server
 	req  *Request  // request
 	res  *Response // response
-}
-
-type ClientResponse struct {
-	client   *Client
-	Response *Response
-	Data     []byte
 }
 
 func NewClient(method string, address string, header map[string][]string, body io.Reader) *Client {
@@ -50,12 +45,42 @@ func NewClient(method string, address string, header map[string][]string, body i
 	return client
 }
 
+func Get(address string, header map[string][]string, body io.Reader) []byte {
+	c := NewClient("GET", address, header, body)
+	defer c.Clean()
+	// Create request
+	req, err := NewRequest(c.method, c.address, c.header, body)
+	if err != nil {
+		panic(err)
+	}
+	// Write request
+	w := bufio.NewWriter(c.conn)
+	err = req.Write(w)
+	if err != nil {
+		if err != io.EOF {
+			panic(err)
+		}
+	}
+	// Read response
+	r := bufio.NewReader(c.conn)
+	if r == nil {
+		return nil
+	}
+	fl, _ := r.ReadString('\n')
+	// Finish
+	return []byte(fl)
+}
+
+func (c *Client) Parse(r *bufio.Reader) {
+
+}
+
 func (c *Client) Do() *Response {
 	// 1. Connect
 	c.dial()
 
 	// 2. Clean up
-	defer c.clean()
+	defer c.Clean()
 
 	// 3. Write request
 	req, err := NewRequest(c.method, c.address, c.header, io.NopCloser(c.body))
@@ -83,23 +108,12 @@ func (c *Client) Do() *Response {
 }
 
 // Connect connects to the server.
-//
-// Example:
-// client.connect()      // 1
-// defer client.clean()  // 2
-// client.writeRequest() // 3
-// client.readResponse() // 4
-// return client
 func (c *Client) dial() {
 	conn, err := net.Dial(c.network, c.address) // start connection
 	if err != nil {
 		panic(err)
 	}
 	c.conn = conn
-}
-
-func (c *Client) Close() error {
-	return c.conn.Close()
 }
 
 // WriteRequest writes the request to the server.
@@ -124,7 +138,7 @@ func (c *Client) readN(n int, conn net.Conn) (buf []byte, err error) {
 }
 
 // Clean closes the connection to the server and cleans up client.
-func (c *Client) clean() error {
+func (c *Client) Clean() error {
 	if c.conn == nil {
 		return fmt.Errorf("Connection is nil")
 	}

@@ -344,43 +344,50 @@ func newRequest(method string, address string, prot string, header map[string][]
 //
 // Write is used after the request has been parsed and validated.
 func (r *Request) Write(w io.Writer) error {
-	return r.write(w)
-}
-
-// write serializes r to w.
-func (r *Request) write(w io.Writer) error {
+	if w == nil {
+		return errors.New("http: nil Writer")
+	}
 	// Note:
 	// - 'fmt.Fprintf' writes the string and automaitcally flushes the buffer
 	// - 'w.Write' writes the string but does not flush the buffer
 	// - 'w.Flush' flushes the buffer
 
-	// TODO: defer closeBody
-
 	// 1.) Wrap the writer in a bufio Writer if it's not already buffered.
 	// Don't always call NewWriter, as that forces a bytes.Buffer
 	// and other small bufio Writers to have a minimum 4k buffer
 	// size.
-	var bw *bufio.Writer
-	if _, ok := w.(io.ByteWriter); !ok { // check if writer is bufferd
-		bw = bufio.NewWriter(w)
-		w = bw
-	}
 
-	// 2. Serialize and write the request line
+	// var bw *bufio.Writer
+	// if _, ok := w.(*bufio.Writer); !ok {
+	// 	bw = bufio.NewWriter(w)
+	// } else {
+	// 	bw = w.(*bufio.Writer)
+	// var bw *bufio.Writer
+	// if _, ok := w.(io.ByteWriter); !ok { // check if writer is bufferd
+	// 	bw = bufio.NewWriter(w)
+	// 	w = bw
+	// }
+	switch v := w.(type) {
+	case *bufio.Writer:
+		return r.write(v)
+	default:
+		return r.write(bufio.NewWriter(w))
+	}
+}
+
+// write serializes r to w.
+func (r *Request) write(w *bufio.Writer) error {
+	// 1. Serialize and write the request line
 	_, err := fmt.Fprintf(w, "%s %s %s\r\n", r.Method, r.URL.RequestURI(), r.Proto)
 	if err != nil {
 		return err
 	}
 
-	// errMissingHost is returned by Write when there is no Host or URL present in
-	// the Request.
-	var errMissingHost = errors.New("http: Request.Write on Request with no Host or URL set")
-
-	// 3. Serialize and write the headers
+	// 2. Serialize and write the headers
 	// TODO: Write Transfer-Encoding, Trailer, and other headers
-
 	// Find the target host. Prefer the Host: header, but if that
 	// is not given, use the host from the request URL.
+	var errMissingHost = errors.New("http: Request.Write on Request with no Host or URL set")
 	host := r.Host
 	if host == "" {
 		if r.URL == nil {
@@ -390,12 +397,13 @@ func (r *Request) write(w io.Writer) error {
 	}
 	host = timeformat.RemoveZone(host)
 	// Validate host
-	// Validate that the Host header is a valid header in general,
-	// but don't validate the host itself. This is sufficient to avoid
-	// header or request smuggling via the Host field.
-	// The server can (and will, if it's a net/http server) reject
-	// the request if it doesn't consider the host valid.
 	if !ValidHostHeader(host) {
+		// Validate that the Host header is a valid header in general,
+		// but don't validate the host itself. This is sufficient to avoid
+		// header or request smuggling via the Host field.
+		// The server can (and will, if it's a net/http server) reject
+		// the request if it doesn't consider the host valid.
+		//
 		// Historically, we would truncate the Host header after '/' or ' '.
 		// Some users have relied on this truncation to convert a network
 		// address such as Unix domain socket path into a valid, ignored
@@ -446,18 +454,16 @@ func (r *Request) write(w io.Writer) error {
 	// TODO: Validate fields
 
 	// 4. Write blank line that ends with CRLF for end of head
-	_, err = io.WriteString(w, "\r\n")
+	_, err = fmt.Fprintf(w, "\r\n")
 	if err != nil {
 		return err
 	}
 
-	// 5. Flush
-	if bw, ok := w.(*bufio.Writer); ok {
-		err = bw.Flush()
-		if err != nil {
-			return err
-		}
-	}
+	// 5. Flush first line and headers
+	// err = w.Flush()
+	// if err != nil {
+	// 	return err
+	// }
 
 	// 5. Write body
 	if r.Body != nil {
@@ -467,9 +473,11 @@ func (r *Request) write(w io.Writer) error {
 			return err
 		}
 	}
-	if bw != nil {
-		return bw.Flush()
-	}
+
+	// // 6. Flush body
+	// if bw != nil {
+	// 	return bw.Flush()
+	// }
 	return nil
 }
 
@@ -1045,3 +1053,134 @@ func readRequest(r *bufio.Reader) (*Request, error) {
 
 	return req, nil
 }
+
+// func (r *Request) Cookie(name string) (*Cookie, error) {
+// 	if name == "" {
+// 		return nil, ErrNoCookie
+// 	}
+// 	for _, c := range readCookies(r.Header, name) {
+// 		return c, nil
+// 	}
+// 	return nil, ErrNoCookie
+// }
+
+// func (r *Request) Cookies() []*Cookie {
+// 	return readCookies(r.Header, "")
+// }
+
+// func (r *Request) AddCookie(c *Cookie) {
+// 	if c == nil || (c.Name == "" && c.Value == "") {
+// 		return
+// 	}
+// 	s := fmt.Sprintf("%s=%s", sanitizeCookieName(c.Name), sanitizeCookieValue(c.Value))
+// 	if c := r.Header.Get("Cookie"); c != "" {
+// 		r.Header.Set("Cookie", c+"; "+s)
+// 	} else {
+// 		r.Header.Set("Cookie", s)
+// 	}
+// }
+
+// func (r *Request) FormValue(key string) string {
+// 	if r.Form == nil {
+// 		r.ParseForm()
+// 	}
+// 	return r.Form.Get(key)
+// }
+
+// func (r *Request) PostFormValue(key string) string {
+// 	if r.PostForm == nil {
+// 		r.ParseForm()
+// 	}
+// 	return r.PostForm.Get(key)
+// }
+
+// func (r *Request) MultipartReader() (*multipart.Reader, error) {
+// 	if r.MultipartForm == multipartByReader {
+// 		return nil, errors.New("http: MultipartReader called twice")
+// 	}
+// 	if r.MultipartForm != nil {
+// 		return nil, errors.New("http: multipart handled by ParseMultipartForm")
+// 	}
+// 	r.MultipartForm = multipartByReader
+// 	return r.multipartReader(true)
+// }
+
+// func (r *Request) ParseMultipartForm(maxMemory int64) error {
+// 	if r.MultipartForm == multipartByReader {
+// 		return errors.New("http: multipart handled by MultipartReader")
+// 	}
+// 	var parseFormErr error
+// 	if r.Form == nil {
+// 		parseFormErr = r.ParseForm()
+// 	}
+// 	if r.MultipartForm != nil {
+// 		return nil
+// 	}
+// 	mr, err := r.multipartReader(false)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	f, err := mr.ReadForm(maxMemory)
+// 	if err != nil {
+// 		return err
+// 	}
+// 	if r.PostForm == nil {
+// 		r.PostForm = make(url.Values)
+// 	}
+// 	for k, v := range f.Value {
+// 		r.Form[k] = append(r.Form[k], v...)
+// 		r.PostForm[k] = append(r.PostForm[k], v...)
+// 	}
+// 	r.MultipartForm = f
+// 	return parseFormErr
+// }
+
+// func (r *Request) ParseForm() error {
+// 	var err error
+// 	if r.PostForm == nil {
+// 		if r.Method == "POST" || r.Method == "PUT" || r.Method == "PATCH" {
+// 			r.PostForm, err = parsePostForm(r)
+// 		}
+// 		if r.PostForm == nil {
+// 			r.PostForm = make(url.Values)
+// 		}
+// 	}
+// 	if r.Form == nil {
+// 		if len(r.PostForm) > 0 {
+// 			r.Form = make(url.Values)
+// 			copyValues(r.Form, r.PostForm)
+// 		}
+// 		var newValues url.Values
+// 		if r.URL != nil {
+// 			newValues, err = url.ParseQuery(r.URL.RawQuery)
+// 		}
+// 		if newValues == nil {
+// 			newValues = make(url.Values)
+// 		}
+// 		if r.Form == nil {
+// 			r.Form = newValues
+// 		} else {
+// 			copyValues(r.Form, newValues)
+// 		}
+// 	}
+// 	return err
+// }
+
+// func (r *Request) FormFile(key string) (multipart.File, *multipart.FileHeader, error) {
+// 	if r.MultipartForm == multipartByReader {
+// 		return nil, nil, errors.New("http: multipart handled by MultipartReader")
+// 	}
+// 	if r.MultipartForm == nil {
+// 		err := r.ParseMultipartForm(defaultMaxMemory)
+// 		if err != nil {
+// 			return nil, nil, err
+// 		}
+// 	}
+// 	if r.MultipartForm != nil && r.MultipartForm.File != nil {
+// 		if fhs := r.MultipartForm.File[key]; len(fhs) > 0 {
+// 			f, err := fhs[0].Open()
+// 			return f, fhs[0], err
+// 		}
+// 	}
+// 	return nil, nil, ErrMissingFile
+// }
