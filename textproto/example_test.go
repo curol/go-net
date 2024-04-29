@@ -3,6 +3,7 @@ package textproto_test
 import (
 	"bufio"
 	"fmt"
+	"testing"
 
 	"github.com/curol/network"
 	"github.com/curol/network/textproto"
@@ -40,4 +41,8 @@ func ExampleNewReader() {
 	for k, v := range headers {
 		fmt.Println(k+":", v)
 	}
+}
+
+func TestExampleNewReader(t *testing.T) {
+	ExampleNewReader()
 }
