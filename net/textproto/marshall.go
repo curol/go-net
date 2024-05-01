@@ -74,7 +74,7 @@ func newParsedTextMessage(r *bufio.Reader) (*parsedTextMessage, error) {
 	}
 	status = strings.TrimSpace(status)
 	pd.status = status
-	pd.headLen += len(status)
+	pd.headLen += len(status) + 2
 
 	// 2. Read and parse headers
 	h, n, e := parseHeaders(r)
@@ -202,6 +202,7 @@ func getHeaderSize(headers map[string][]string) int {
 		for _, value := range values {
 			size += len(value) // Add length of each header value
 		}
+		size += 4 // Add length of ": \r\n"
 	}
 	return size
 }

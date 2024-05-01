@@ -57,12 +57,12 @@ type TextMessage struct {
 	ContentLen int64         // Content-Length header for size of content
 	ContentTyp string        // Content-Tupe header for type of content
 	// meta
-	isReadTextMessage bool
-	isReadBody        bool // true if body read
-	r                 *bufio.Reader
-	bytesRead         int64
+	isParsed   bool
+	isReadBody bool // true if body read
+	bytesRead  int64
 }
 
+// Buffer returns the TextMessage as a *bytes.buffer
 func (tp *TextMessage) Buffer() *bytes.Buffer {
 	b := bytes.NewBuffer(nil)
 	tp.WriteTo(b)
@@ -75,9 +75,22 @@ func (tp *TextMessage) Bytes() []byte {
 	return buf.Bytes()
 }
 
+// StdOut writes the TextMessage to stdout
+func (tp *TextMessage) StdOut() {
+	w := bufio.NewWriter(os.Stdout)
+	tp.WriteTo(w)
+}
+
 // Strings returns the TextMessage as a slice of strings without the \r\n
 func (tp *TextMessage) Strings() []string {
 	return strings.Split(string(tp.Bytes()), "\r\n")
+}
+
+// Head return the head of the TextMessage
+func (tm *TextMessage) Head() {
+	buf := bytes.NewBuffer(nil)
+	w := bufio.NewWriter(buf)
+	tm.serialize(w, false)
 }
 
 // File saves content to disk
@@ -101,17 +114,25 @@ func (tm *TextMessage) File(path string) (int64, error) {
 	return n, nil
 }
 
-// Read body to p
+// Read reads TextMessage.body to p
 func (tm *TextMessage) Read(p []byte) (int, error) {
 	return tm.Body.Read(p)
 }
 
-// Size returns the size of the TextMessage
+// Size returns the size of the TextMessage (headers + body)
 func (tp *TextMessage) Size() int64 {
 	return int64(tp.bytesRead) + tp.ContentLen
 }
 
-// WriteTo serializes the TextMessage and writes to w
+func (tm *TextMessage) ContentLength() int64 {
+	return tm.ContentLen
+}
+
+func (tm *TextMessage) ContentType() string {
+	return tm.ContentTyp
+}
+
+// WriteTo serializes TextMessage to w
 func (tm *TextMessage) WriteTo(w io.Writer) (int64, error) {
 	var bw *bufio.Writer
 
@@ -125,39 +146,37 @@ func (tm *TextMessage) WriteTo(w io.Writer) (int64, error) {
 		return 0, fmt.Errorf("textproto: writer type '%T' not supported", v)
 	}
 
-	return tm.serialize(bw)
+	n, err := tm.serialize(bw, true)
+	if err != nil {
+		return n, err
+	}
+	return n, nil
 }
 
-// var s strings.Builder
-// s.WriteString(tp.Status + "\r\n") // Status line
-// h := string(serializeHeaders(tp.Headers))
-// s.WriteString(h) // Headers
-// s.WriteString("\r\n") // Blank line between headers and body
+// serialize writes the TextMessage to w and returns the number of bytes written
+// It writes the status line, headers, and body to w.
 //
-// b := bytes.NewBuffer(nil)
-// b.WriteString(tp.Status + "\r\n") // Status line
-// b.Write(serializeHeaders(tp.Headers)) // Headers
-// b.Write([]byte("\r\n")) // Blank line between headers and body
-func (tp *TextMessage) serialize(bw *bufio.Writer) (int64, error) {
+// Example:
+// tp := &TextMessage{Status: "200 OK", Headers: MIMEHeader{"Content-Type": []string{"text/plain"}}, Body: bufio.NewReader(strings.NewReader("Hello, World!"))}
+// bw := bufio.NewWriter(os.Stdout)
+// n, err := tp.serialize(bw)
+func (tp *TextMessage) serialize(bw *bufio.Writer, isSerializeBody bool) (int64, error) {
 	// var bw *bufio.Writer
 	var n int64
 	var err error
 	headers := tp.Headers
 	dlm := "\r\n"
-
-	// clean up
+	// 1. Clean up
 	defer func() {
 		err = bw.Flush()
 		if err != nil {
 			fmt.Println("textproto: Error flushing serialization to w - ", err)
 		}
 	}()
-
-	// status line
+	// 2. Status line
 	sn, _ := fmt.Fprintf(bw, "%s%s", tp.Status, dlm) // Write status line
 	n = int64(sn)
-
-	// headers
+	// 3. Headers
 	// h := serializeHeaders(tp.Headers)
 	// n2, _ = fmt.Fprint(bw, string(h)) // Write headers
 	for name, values := range headers {
@@ -166,13 +185,14 @@ func (tp *TextMessage) serialize(bw *bufio.Writer) (int64, error) {
 			n += int64(hn)
 		}
 	}
-
-	// end of headers
+	// 4. End of headers
 	ehn, _ := fmt.Fprintf(bw, dlm) // Write blank line between headers and body
 	n += int64(ehn)
-
-	// body
-	// 1. Validate
+	// 5. Body
+	if !isSerializeBody {
+		return n, err
+	}
+	// 5.1. Validate
 	cl := tp.ContentLen
 	if cl < 0 {
 		return 0, fmt.Errorf("textproto: Content-Length less than 0 %d", cl)
@@ -183,8 +203,7 @@ func (tp *TextMessage) serialize(bw *bufio.Writer) (int64, error) {
 	if tp.isReadBody {
 		return 0, fmt.Errorf("textproto: Body already read")
 	}
-
-	// 2. Copy body to dst
+	// 5.2. Copy body to dst
 	src := tp.Body
 	dst := bw
 	bn, err := io.CopyN(dst, src, cl)
@@ -193,77 +212,14 @@ func (tp *TextMessage) serialize(bw *bufio.Writer) (int64, error) {
 	if err != nil {
 		return n, err
 	}
-
-	// 4. Check if body is fully read
+	// 5.3. Check if body is fully read
 	if bn != cl {
 		se := fmt.Sprintf("textproto: content length '%d' doesn't match bytes written to w'%d'", cl, bn)
 		return n, fmt.Errorf(se)
 	}
-
-	// 5. Return bytes read
-	return n, nil
+	// 6. Return bytes read and error
+	return n, err
 }
-
-// func (tm *TextMessage) writeBodyTo(w *bufio.Writer) (int64, error) {
-// 	src := tm.Body
-// 	dst := w
-// 	cl := tm.ContentLen
-
-// 	// 1. Validate
-// 	if cl < 0 {
-// 		return 0, fmt.Errorf("textproto: Content-Length less than 0 %d", cl)
-// 	}
-// 	if cl == 0 {
-// 		return 0, nil
-// 	}
-// 	if tm.isReadBody {
-// 		return 0, fmt.Errorf("textproto: Body already read")
-// 	}
-
-// 	// 2. Copy body to dst
-// 	defer dst.Flush()
-// 	n, err := io.CopyN(dst, src, cl)
-// 	tm.isReadBody = true
-// 	if err != nil {
-// 		return n, err
-// 	}
-
-// 	// 4. Check if body is fully read
-// 	if n != cl {
-// 		se := fmt.Sprintf("textproto: content length '%d' doesn't match bytes written to w'%d'", cl, bn)
-// 		return n, fmt.Errorf(se)
-// 	}
-
-// 	// 5. Return bytes read
-// 	return n, nil
-// }
-
-// serialize to buffer
-// func (tm *TextMessage) toBuffer() *bytes.Buffer {
-// 	var buffer bytes.Buffer
-// 	headers := tm.Headers
-// 	sl := tm.Status
-// 	dlm := "\r\n"
-
-// 	// sl
-// 	buffer.WriteString(sl + dlm)
-// 	// headers
-// 	for name, values := range headers {
-// 		for _, value := range values {
-// 			buffer.WriteString(name)
-// 			buffer.WriteString(": ")
-// 			buffer.WriteString(value)
-// 			buffer.WriteString(dlm)
-// 		}
-// 	}
-// 	buffer.WriteString(dlm) // end of headers
-
-// 	// body
-// 	// TODO: hande error
-// 	buffer.ReadFrom(tm.Body)
-
-// 	// return bufio.NewReader(tm.Body)
-// }
 
 // ReadTextMessage reads from r and parses the text message
 func ReadTextMessage(r *bufio.Reader) (*TextMessage, error) {
@@ -279,8 +235,7 @@ func ReadTextMessage(r *bufio.Reader) (*TextMessage, error) {
 	tp.ContentLen = parsedMess.cl
 	tp.bytesRead = int64(parsedMess.headLen)
 	tp.Body = parsedMess.body
-	tp.isReadTextMessage = true
+	tp.isParsed = true
 	tp.isReadBody = false
-	tp.r = r
 	return tp, nil
 }
