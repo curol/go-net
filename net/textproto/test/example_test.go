@@ -8,108 +8,134 @@ import (
 	"testing"
 	"time"
 
+	"github.com/curol/network/net/testutil"
 	"github.com/curol/network/net/textproto"
 )
 
+func exampleHandlerFunc(conn net.Conn) {
+	defer conn.Close()
+
+	// Read the request
+	tm, err := textproto.ReadTextMessage(bufio.NewReader(conn))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("Server Request:", tm)
+	b, err := tm.Bytes()
+	if err != nil {
+		fmt.Println("error to bytes", err)
+		return
+	}
+	fmt.Println("Server Request size:", len(b))
+	fmt.Println("Server Request bytes:", b)
+	fmt.Println("Server Request string:")
+	fmt.Println("--------Start-----------")
+	fmt.Print(string(b))
+	fmt.Println("\n---------Finished----------")
+
+	// Write response
+	rawRes := []byte("HTTP/1.0 200 OK\r\nUser-Agent: textproto example\r\nType: Response\r\nAccept: */*\r\n\r\n")
+	fmt.Fprint(conn, string(rawRes))
+}
+
+func printRawRequest(rawReq []byte) {
+	fmt.Println("---")
+	fmt.Println("- Raw request size:", len(rawReq))
+	fmt.Println("- Raw request bytes", rawReq)
+	fmt.Println("---")
+}
+
 func TestExampleTextMessage(t *testing.T) {
 	// 1. Server
-	handlerFunc := func(conn net.Conn) {
-		//
-		defer conn.Close()
-
-		// Read the request
-		tm, err := textproto.ReadTextMessage(bufio.NewReader(conn))
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		fmt.Println("Server Request:", tm)
-		fmt.Println("Server Request string:", string(tm.Bytes()))
-
-		// Write response
-		rawRes := []byte("HTTP/1.0 200 OK\r\nUser-Agent: textproto example\r\nType: Response\r\nAccept: */*\r\n\r\n")
-		fmt.Fprint(conn, string(rawRes))
-	}
-	go mockServer(handlerFunc)
+	go testutil.MockServer(exampleHandlerFunc)
 	time.Sleep(2 * time.Second)
 
 	// 2. Client
 	rawReq := []byte("GET / HTTP/1.0\r\nUser-Agent: textproto example\r\nAccept: */*\r\n\r\n")
-	mockClientReq(rawReq)
+	printRawRequest(rawReq)
+
+	testutil.MockClientReq(rawReq)
 }
 
-func TestExampleTextMessageWithBody(t *testing.T) {
+func TestExampleTextMessageWithBody1(t *testing.T) {
 	// 1. Server
-	go mockServer(mockStdoutHandlerFunc)
+	go testutil.MockServer(exampleHandlerFunc)
+	time.Sleep(2 * time.Second)
+
+	// 2. Client request
+	lines := []string{
+		"GET / HTTP/1.0",
+		"User-Agent: textproto example",
+		"Accept: */*",
+		"Content-Length: 5",
+		"",      // end of headers
+		"Hello", // body
+	}
+	rawReq := []byte(strings.Join(lines, "\r\n"))
+
+	printRawRequest(rawReq)
+
+	testutil.MockClientReq(rawReq)
+}
+
+func TestExampleTextMessageWithBody2(t *testing.T) {
+	// 1. Server
+	go testutil.MockServer(exampleHandlerFunc)
+	time.Sleep(2 * time.Second)
+
+	// 2. Client request
+	lines := []string{
+		"GET / HTTP/1.0",
+		"User-Agent: textproto example",
+		"Accept: */*",
+		"Content-Length: 12",
+		"",             // end of headers
+		"Hello World!", // body
+	}
+	rawReq := []byte(strings.Join(lines, "\r\n"))
+
+	printRawRequest(rawReq)
+
+	testutil.MockClientReq(rawReq)
+}
+
+func TestExampleTextMessageWithBodyAndContentLengthShorter(t *testing.T) {
+	// 1. Server
+	go testutil.MockServer(exampleHandlerFunc)
 	time.Sleep(2 * time.Second)
 	// 2. Client
 	lines := []string{
 		"GET / HTTP/1.0",
 		"User-Agent: textproto example",
 		"Accept: */*",
-		"Content-Length: 5",
-		"",
-		"Hello",
+		"Content-Length: 5", // content length header shorter than actual contents
+		"",                  // end of headers
+		"Hello World",
 	}
 	rawReq := []byte(strings.Join(lines, "\r\n"))
-	fmt.Println("Client request size:", len(rawReq))
-	mockClientReq(rawReq)
+
+	printRawRequest(rawReq)
+
+	testutil.MockClientReq(rawReq)
 }
 
-// func TestExampleReq(t *testing.T) {
-// 	exampleReq()
-// }
+func TestExampleTextMessageWithContentLengthAndNoBody(t *testing.T) {
+	// 1. Server
+	go testutil.MockServer(exampleHandlerFunc)
+	time.Sleep(2 * time.Second)
+	// 2. Client
+	lines := []string{
+		"GET / HTTP/1.0",
+		"User-Agent: textproto example",
+		"Accept: */*",
+		"Content-Length: 5", // content length header shorter than actual contents
+		"",                  // end of headers
+		"",                  // no body
+	}
+	rawReq := []byte(strings.Join(lines, "\r\n"))
 
-// func TestExampleRes(t *testing.T) {
-// 	exampleRes()
-// }
+	printRawRequest(rawReq)
 
-// func TestExampleServer(t *testing.T) {
-// 	// Server
-// 	go exampleServer()
-
-// 	// Wait for server to start
-// 	time.Sleep(2 * time.Second)
-
-// 	// Client
-// 	conn, _ := net.Dial("tcp", "localhost:8080")
-// 	fmt.Fprintf(conn, "GET / HTTP/1.0\r\n\r\n")
-// 	time.Sleep(5 * time.Second)
-// }
-
-// func exampleReq() {
-// 	// Connect to the server
-// 	conn, err := network.Dial("tcp", "golang.org:80")
-// 	if err != nil {
-// 		fmt.Println(err)
-// 		return
-// 	}
-// 	defer conn.Close()
-
-// 	// Mock request
-// 	fmt.Fprintf(conn, "GET / HTTP/1.0\r\n\r\n")
-
-// 	// Read request
-// 	req := textproto.NewRequest(bufio.NewReader(conn)) // Read from connection
-// 	req.Read()
-
-// 	fmt.Println(req)
-// }
-
-// func exampleRes() {
-// 	// Connect to the server
-// 	conn, err := network.Dial("tcp", "golang.org:80")
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	defer conn.Close()
-
-// 	// Write response
-// 	res := textproto.NewResponse(bufio.NewWriter(conn)) // Write to connection
-// 	defer res.Close()
-// 	_, err = res.Write([]byte("HTTP/1.0 200 OK"))
-// 	if err != nil {
-// 		fmt.Println(err)
-// 		return
-// 	}
-// }
+	testutil.MockClientReq(rawReq)
+}
